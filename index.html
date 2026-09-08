@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Furago - Apprendre le Français</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <header class="app-header">
+        <button id="back-btn" class="hidden">🔙 Retour</button>
+        <h1 id="app-title">Furago</h1>
+    </header>
+
+    <main id="app-container">
+        <!-- Loader -->
+        <div id="loader" class="loader-container">
+            <div class="spinner"></div>
+            <p>Chargement des articles...</p>
+        </div>
+
+        <!-- Liste des articles (Accueil) -->
+        <div id="home-view" class="view hidden">
+            <ul id="article-list" class="article-list"></ul>
+        </div>
+
+        <!-- Vue de lecture d'un article -->
+        <div id="reading-view" class="view hidden">
+            <div class="article-header">
+                <h2 id="article-title">Titre</h2>
+                <span id="article-meta">Date - Niveau</span>
+            </div>
+            
+            <div class="reading-controls">
+                <label>
+                    <input type="checkbox" id="toggle-highlight">
+                    Mettre en évidence les mots difficiles
+                </label>
+            </div>
+
+            <div id="article-content" class="article-content">
+                <!-- Le contenu de l'article sera injecté ici par JavaScript -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Panneau de traduction flottant en bas de l'écran -->
+    <div id="translation-panel" class="translation-panel hidden">
+        <div class="translation-header">
+            <h3 id="trans-word">Mot</h3>
+            <span id="trans-gender" class="badge">Genre</span>
+        </div>
+        <p id="trans-pronunciation" class="pronunciation">/prononciation/</p>
+        <p id="trans-meaning" class="meaning">Traduction</p>
+        <button id="btn-listen" class="btn-listen">🔊 Écouter (Français)</button>
+    </div>
+
+    <!-- Contrôles audio globaux -->
+    <div id="audio-bar" class="audio-bar hidden">
+        <button id="btn-play-all">▶️ Écouter l'article entier</button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
