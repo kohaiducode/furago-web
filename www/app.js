@@ -1,5 +1,30 @@
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
 
+// Polyfill pour éviter les crashs si speechSynthesis n'est pas supporté (ex: certains WebViews Android)
+if (typeof window.speechSynthesis === 'undefined') {
+    window.speechSynthesis = {
+        getVoices: () => [],
+        speak: () => {},
+        cancel: () => {},
+        pause: () => {},
+        resume: () => {},
+        onvoiceschanged: null
+    };
+}
+if (typeof window.SpeechSynthesisUtterance === 'undefined') {
+    window.SpeechSynthesisUtterance = function(text) {
+        this.text = text;
+        this.lang = 'fr-FR';
+        this.rate = 1;
+        this.pitch = 1;
+        this.volume = 1;
+        this.voice = null;
+        this.onend = null;
+        this.onerror = null;
+        this.onstart = null;
+        this.onboundary = null;
+    };
+}
 // État Global
 let currentArticles = [];
 let categories = new Set();
