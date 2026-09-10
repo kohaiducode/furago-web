@@ -1,15 +1,17 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Furago - Apprendre le Français</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="manifest" href="manifest.json">
+    <title>Furago - フランス語学習</title>
+    <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
     <header class="app-header">
-        <button id="back-btn" class="hidden">🔙 Retour</button>
+        <button id="back-btn" class="hidden">
+            <!-- Icône Flèche Retour -->
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
         <h1 id="app-title">Furago</h1>
     </header>
 
@@ -17,50 +19,149 @@
         <!-- Loader -->
         <div id="loader" class="loader-container">
             <div class="spinner"></div>
-            <p>Chargement des articles...</p>
+            <p>記事を読み込んでいます...</p> <!-- Chargement des articles... -->
         </div>
 
-        <!-- Liste des articles (Accueil) -->
+        <!-- Accueil (Liste et Filtres) -->
         <div id="home-view" class="view hidden">
+            
+            <div class="filters-bar">
+                <button id="global-level-btn" class="filter-btn">レベル A1</button>
+                <button id="global-category-btn" class="filter-btn">カテゴリー (すべて)</button>
+            </div>
+
             <ul id="article-list" class="article-list"></ul>
         </div>
 
         <!-- Vue de lecture d'un article -->
         <div id="reading-view" class="view hidden">
-            <div class="article-header">
-                <h2 id="article-title">Titre</h2>
-                <span id="article-meta">Date - Niveau</span>
+            
+            <!-- Image en plein format si disponible -->
+            <div id="article-hero" style="margin: -16px -16px 20px -16px; display: none;">
+                <img id="article-image" src="" alt="" style="width: 100%; height: 220px; object-fit: cover;">
             </div>
             
-            <div class="reading-controls">
-                <label>
-                    <input type="checkbox" id="toggle-highlight">
-                    Mettre en évidence les mots difficiles
-                </label>
+            <div class="article-header">
+                <h2 id="article-title">Titre</h2>
+                <span id="article-meta">Date - Catégorie</span>
+            </div>
+            
+            <!-- Lecteur Audio Pro -->
+            <div class="audio-panel">
+                <div class="audio-controls">
+                    <button id="btn-play-pause" class="btn-icon">
+                        <!-- L'icône et le texte seront gérés par JS -->
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                        再生 <!-- Lire -->
+                    </button>
+                    <button id="btn-restart" class="btn-icon hidden">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"></path><path d="M3 8A9 9 0 1 1 12 21a9 9 0 0 1-9-9"></path></svg>
+                        最初から <!-- Recommencer -->
+                    </button>
+                </div>
+                <div class="audio-options-row">
+                    <select id="audio-speed-select" class="audio-select">
+                        <option value="1">速度 : 標準 (1x)</option>
+                        <option value="0.8">速度 : 遅い (0.8x)</option>
+                        <option value="0.6">速度 : とても遅い (0.6x)</option>
+                    </select>
+                    <select id="audio-voice-select" class="audio-select">
+                        <option value="">声を読み込み中...</option>
+                    </select>
+                </div>
             </div>
 
             <div id="article-content" class="article-content">
                 <!-- Le contenu de l'article sera injecté ici par JavaScript -->
             </div>
+
+            <!-- Section Quiz -->
+            <div id="quiz-section" class="hidden">
+                <h3>🧠 理解度クイズ</h3> <!-- Quiz de compréhension -->
+                <div id="quiz-container">
+                    <!-- Les questions seront injectées ici -->
+                </div>
+            </div>
+        </div> <!-- Fin de reading-view -->
+
+        <div id="word-list-view" class="view hidden">
+            <!-- Vue 1 : Liste des dossiers -->
+            <div id="lists-overview">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+                    <h2 style="font-size: 1.6rem; color: var(--primary);">単語帳</h2>
+                    <button id="btn-create-list" style="background:var(--primary); color:white; border:none; padding:6px 12px; border-radius:16px; font-weight:bold; font-size:0.85rem; cursor:pointer;">+ 新しいリスト</button>
+                </div>
+                <div id="lists-container" style="display:grid; gap:12px;">
+                    <!-- Les dossiers seront générés ici -->
+                </div>
+            </div>
+
+            <!-- Vue 2 : Contenu d'un dossier -->
+            <div id="list-detail-view" class="hidden">
+                <div style="display:flex; align-items:center; margin-bottom: 24px; gap: 12px;">
+                    <button id="btn-back-to-lists" style="background:var(--bg); border:1px solid var(--border); border-radius:50%; width:36px; height:36px; display:flex; justify-content:center; align-items:center; font-size:1.2rem; color:var(--text-main); cursor:pointer;">←</button>
+                    <h2 id="current-list-title" style="font-size: 1.4rem; color: var(--primary); margin:0;">Nom de la liste</h2>
+                </div>
+                <div id="saved-words-container">
+                    <!-- Les mots enregistrés seront affichés ici -->
+                </div>
+            </div>
         </div>
+
+        <!-- Pop-up Dictionnaire -->
+        <div id="dict-popup" class="dict-popup hidden">
+            <div class="dict-header">
+                <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:0;">
+                    <span id="dict-word" class="dict-word">Mot</span>
+                </div>
+                <div class="dict-buttons">
+                    <button id="dict-save-btn" class="dict-save-btn" title="Sauvegarder dans la liste">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                    <button id="dict-audio-btn" class="dict-audio-btn" title="Écouter">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="dict-translation" class="dict-translation">翻訳中...</div>
+        </div>
+
+        <!-- Modal de sélection de liste -->
+        <div id="list-selector-modal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; justify-content: center; align-items: center;">
+            <div style="background: var(--surface); padding: 24px; border-radius: 16px; width: 85%; max-width: 320px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                <h3 style="margin-top: 0; margin-bottom: 20px; text-align: center; color: var(--text-main); font-size: 1.2rem;">保存先を選択<br><span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted);">Choisir une liste</span></h3>
+                <div id="list-selector-container" style="display: flex; flex-direction: column; gap: 10px; max-height: 50vh; overflow-y: auto;">
+                    <!-- Boutons injectés en JS -->
+                </div>
+                <button id="list-selector-cancel" style="margin-top: 20px; width: 100%; padding: 12px; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 12px; font-weight: bold; font-size: 1rem; cursor: pointer;">キャンセル (Annuler)</button>
+            </div>
+        </div>
+
+        <!-- Modal Filtres (Niveau / Catégorie) -->
+        <div id="filter-selector-modal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; justify-content: center; align-items: flex-end;">
+            <div id="filter-modal-body" style="background: var(--surface); padding: 20px 24px 30px; border-radius: 24px 24px 0 0; width: 100%; max-height: 70vh; display: flex; flex-direction: column; transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: translateY(100%);">
+                <div style="width: 40px; height: 5px; background: #E5E5EA; border-radius: 3px; margin: 0 auto 20px auto;"></div>
+                <h3 id="filter-modal-title" style="margin-top: 0; margin-bottom: 20px; text-align: center; color: var(--text-main); font-size: 1.2rem; font-weight: 700;">Sélectionner</h3>
+                <div id="filter-options-container" style="display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-bottom: 20px;">
+                    <!-- Options injectées -->
+                </div>
+            </div>
+        </div>
+
     </main>
 
-    <!-- Panneau de traduction flottant en bas de l'écran -->
-    <div id="translation-panel" class="translation-panel hidden">
-        <div class="translation-header">
-            <h3 id="trans-word">Mot</h3>
-            <span id="trans-gender" class="badge">Genre</span>
-        </div>
-        <p id="trans-pronunciation" class="pronunciation">/prononciation/</p>
-        <p id="trans-meaning" class="meaning">Traduction</p>
-        <button id="btn-listen" class="btn-listen">🔊 Écouter (Français)</button>
-    </div>
+    <!-- Navigation du Bas -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" id="nav-articles">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            記事
+        </button>
+        <button class="nav-item" id="nav-words">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+            単語帳
+        </button>
+    </nav>
 
-    <!-- Contrôles audio globaux -->
-    <div id="audio-bar" class="audio-bar hidden">
-        <button id="btn-play-all">▶️ Écouter l'article entier</button>
-    </div>
-
-    <script src="app.js"></script>
+    <script src="app.js?v=6"></script>
 </body>
 </html>
