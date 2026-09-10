@@ -4,8 +4,30 @@ const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
 if (typeof window.speechSynthesis === 'undefined') {
     window.speechSynthesis = {
         getVoices: () => [],
-        speak: () => {},
-        cancel: () => {},
+        speak: async (utterance) => {
+            if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech) {
+                try {
+                    if (utterance.onstart) utterance.onstart();
+                    await window.Capacitor.Plugins.TextToSpeech.speak({
+                        text: utterance.text,
+                        lang: utterance.lang || 'fr-FR',
+                        rate: utterance.rate || 1.0,
+                    });
+                    if (utterance.onend) utterance.onend();
+                } catch(e) {
+                    console.error("TTS Plugin Error:", e);
+                    if (utterance.onerror) utterance.onerror(e);
+                    if (utterance.onend) utterance.onend();
+                }
+            } else {
+                if (utterance.onend) utterance.onend();
+            }
+        },
+        cancel: async () => {
+            if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech) {
+                await window.Capacitor.Plugins.TextToSpeech.stop();
+            }
+        },
         pause: () => {},
         resume: () => {},
         onvoiceschanged: null
