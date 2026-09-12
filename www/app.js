@@ -157,57 +157,38 @@ function initVoices() {
         }
 
         allLocalFrVoices = voices.filter(v => {
-              const l = (v.lang || '').toLowerCase();
-              const n = (v.name || '').toLowerCase();
-              if (l.includes('fr-ca') || l.includes('canada') || n.includes('canada') || n.includes('canadien')) return false;
-              return l.startsWith('fr') && !v.name.includes('Google');
-          });
-          if (allLocalFrVoices.length === 0) {
-              allLocalFrVoices = voices.filter(v => {
-                  const l = (v.lang || '').toLowerCase();
-                  const n = (v.name || '').toLowerCase();
-                  if (l.includes('fr-ca') || l.includes('canada') || n.includes('canada') || n.includes('canadien')) return false;
-                  return l.startsWith('fr');
-              });
-          }
+                const l = (v.lang || '').toLowerCase();
+                const n = (v.name || '').toLowerCase();
+                if (l.includes('fr-ca') || l.includes('canada') || n.includes('canada') || n.includes('canadien')) return false;
+                // Retire les voix réseau (souvent des doublons des voix locales)
+                if (n.includes('network') || n.includes('réseau')) return false;
+                return l.startsWith('fr');
+            });
+            
+            // Dédoublonnage basé sur l'identifiant de la voix
+            const uniqueVoices = [];
+            const seenUris = new Set();
+            allLocalFrVoices.forEach(v => {
+                let identifier = (v.voiceURI || v.name || '').toLowerCase().replace(/-local/g, '').replace(/-network/g, '').trim();
+                if (!seenUris.has(identifier)) {
+                    seenUris.add(identifier);
+                    uniqueVoices.push(v);
+                }
+            });
+            allLocalFrVoices = uniqueVoices;
         
         if (audioVoiceSelect) {
             audioVoiceSelect.innerHTML = '';
             if (allLocalFrVoices.length === 0) {
                 audioVoiceSelect.innerHTML = '<option value="">Voix par défaut</option>';
             } else {
-                let femaleNames = ["Sophie", "Camille", "Léa", "Alice", "Emma"];
-                  let maleNames = ["Thomas", "Lucas", "Hugo", "Paul", "Arthur"];
-                  let fIdx = 0;
-                  let mIdx = 0;
-                  
-                  allLocalFrVoices.forEach((v, index) => {
+                allLocalFrVoices.forEach((v, index) => {
                       const option = document.createElement('option');
                       option.value = index;
-                      let vName = v.name.toLowerCase();
-                      let isFemale = false;
-                      let isMale = false;
+                      let vName = v.name || v.voiceURI || "Inconnu";
                       
-                      if (/hortense|julie|amelie|audrey|aurelie|alice|léa|roxane|carmit|vlf|vld|vla|female|femme/i.test(vName)) {
-                          isFemale = true;
-                      } else if (/paul|thomas|nicolas|david|henri|martin|claude|bernard|vle|vlc|vlb|male|homme/i.test(vName)) {
-                          isMale = true;
-                      } else {
-                          // Si le système ne donne pas d'indice, on alterne Femme/Homme (typiquement Android)
-                          if (index % 2 === 0) isFemale = true;
-                          else isMale = true;
-                      }
-                      
-                      let displayName = "";
-                      if (isFemale) {
-                          displayName = `(女) ${femaleNames[fIdx % femaleNames.length]}`;
-                          fIdx++;
-                      } else {
-                          displayName = `(男) ${maleNames[mIdx % maleNames.length]}`;
-                          mIdx++;
-                      }
-                      
-                      option.textContent = displayName;
+                      // On affiche temporairement le VRAI nom système pour pouvoir les mapper
+                      option.textContent = `🎤 ${vName.substring(0, 30)}`;
                       audioVoiceSelect.appendChild(option);
                   });
                 
