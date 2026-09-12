@@ -1,3 +1,4 @@
+try {
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
 
 // Polyfill pour éviter les crashs si speechSynthesis n'est pas supporté (ex: certains WebViews Android)
@@ -55,11 +56,12 @@ let globalCategory = "ALL";
 let currentArticleData = null; 
 
 // État Audio
+let currentQueueIndex = 0;
+let ttsQueue = [];
 let currentUtterance = null; 
 let isPlaying = false;
 let isPaused = false;
 let preferredVoice = null;
-let lastCharIndex = 0; // Pour reprendre la lecture au bon endroit si on change de vitesse
 
 // État Quiz
 let currentQuizData = [];
@@ -95,7 +97,7 @@ const articleContent = document.getElementById('article-content');
 const quizSection = document.getElementById('quiz-section');
 const quizContainer = document.getElementById('quiz-container');
 
-// DOM Audio
+// DOM Audio\nconst audioPanel = document.getElementById(\'audio-panel\');\nconst fabAudio = document.getElementById(\'fab-audio\');\nconst btnCloseAudio = document.getElementById(\'btn-close-audio\');\nconst audioProgressBar = document.getElementById(\'audio-progress-bar\');
 const btnPlayPause = document.getElementById('btn-play-pause');
 const btnRestart = document.getElementById('btn-restart');
 const audioSpeedSelect = document.getElementById('audio-speed-select');
@@ -126,50 +128,63 @@ async function initApp() {
 
 // 2. Gestion des voix de synthèse
 function initVoices() {
-    const loadVoices = () => {
-        const voices = window.speechSynthesis.getVoices();
+    const loadVoices = async () => {
+        let voices = (window.speechSynthesis && window.speechSynthesis.getVoices) ? window.speechSynthesis.getVoices() : [];
         
+        if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech) {
+            try {
+                const res = await window.Capacitor.Plugins.TextToSpeech.getSupportedVoices();
+                if (res && res.voices) voices = res.voices;
+            } catch(e) { console.error(e); }
+        }
+
+        if (voices.length === 0) {
+            setTimeout(loadVoices, 500);
+            return;
+        }
+
         allLocalFrVoices = voices.filter(v => v.lang.startsWith('fr') && !v.name.includes('Google'));
         if (allLocalFrVoices.length === 0) {
             allLocalFrVoices = voices.filter(v => v.lang.startsWith('fr'));
         }
         
-        if (audioVoiceSelect && allLocalFrVoices.length > 0) {
+        if (audioVoiceSelect) {
             audioVoiceSelect.innerHTML = '';
-            let maleCount = 0;
-            let femaleCount = 0;
-            let otherCount = 0;
-            
-            allLocalFrVoices.forEach((v, index) => {
-                const option = document.createElement('option');
-                option.value = index;
+            if (allLocalFrVoices.length === 0) {
+                audioVoiceSelect.innerHTML = '<option value="">Voix par défaut</option>';
+            } else {
+                let maleCount = 0;
+                let femaleCount = 0;
+                let otherCount = 0;
                 
-                let vName = v.name.toLowerCase();
-                let displayName = "";
+                allLocalFrVoices.forEach((v, index) => {
+                    const option = document.createElement('option');
+                    option.value = index;
+                    let vName = v.name.toLowerCase();
+                    let displayName = "";
+                    
+                    if (/hortense|julie|amelie|audrey|aurelie|alice|léa|roxane|carmit/i.test(vName)) {
+                        femaleCount++;
+                        displayName = `女性 ${femaleCount}`;
+                    } else if (/paul|thomas|nicolas|david|henri|martin|claude|bernard/i.test(vName)) {
+                        maleCount++;
+                        displayName = `男性 ${maleCount}`;
+                    } else {
+                        otherCount++;
+                        displayName = `音声 ${otherCount}`;
+                    }
+                    option.textContent = `声：${displayName}`;
+                    audioVoiceSelect.appendChild(option);
+                });
                 
-                // Déduction basique du genre
-                if (/hortense|julie|amelie|audrey|aurelie|alice|léa|roxane|carmit/i.test(vName)) {
-                    femaleCount++;
-                    displayName = `女性 ${femaleCount}`;
-                } else if (/paul|thomas|nicolas|david|henri|martin|claude|bernard/i.test(vName)) {
-                    maleCount++;
-                    displayName = `男性 ${maleCount}`;
-                } else {
-                    otherCount++;
-                    displayName = `音声 ${otherCount}`; // "Voix X" pour les autres
+                if (!preferredVoice) {
+                    preferredVoice = allLocalFrVoices[0];
                 }
-                
-                option.textContent = `声：${displayName}`;
-                audioVoiceSelect.appendChild(option);
-            });
-            
-            if (!preferredVoice) {
-                preferredVoice = allLocalFrVoices[0];
             }
         }
     };
     loadVoices();
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    if (window.speechSynthesis && window.speechSynthesis.onvoiceschanged !== undefined) {
         window.speechSynthesis.onvoiceschanged = loadVoices;
     }
 }
@@ -180,8 +195,8 @@ if (audioVoiceSelect) {
         if (isPlaying) {
             isPaused = false;
             isPlaying = false;
-            window.speechSynthesis.cancel();
-            setTimeout(() => { playAudio(lastCharIndex); }, 100);
+            if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
+            setTimeout(() => { playAudio(currentQueueIndex); }, 100);
         }
     });
 }
@@ -207,6 +222,7 @@ function openFilterModal(type) {
 
     if (type === 'level') {
         filterModalTitle.textContent = 'レベルを選択 (Choisir un niveau)';
+        filterOptionsContainer.classList.remove('filter-grid');
         const levels = ['A1', 'A2', 'B1', 'B2', 'C1'];
         levels.forEach(level => {
             const btn = document.createElement('button');
@@ -227,6 +243,7 @@ function openFilterModal(type) {
         });
     } else if (type === 'category') {
         filterModalTitle.textContent = 'カテゴリーを選択 (Choisir une catégorie)';
+        filterOptionsContainer.classList.add('filter-grid');
         const cats = ['ALL', ...Array.from(categories)];
         cats.forEach(cat => {
             const btn = document.createElement('button');
@@ -283,7 +300,7 @@ function renderHome() {
         }
 
         const li = document.createElement('li');
-        li.className = 'article-card fade-in';
+        li.className = 'article-card fade-in ' + (index === 0 ? 'hero-format' : 'list-format');
         li.style.animationDelay = `${index * 0.05}s`;
         li.style.opacity = '0'; // Assure que c'est invisible avant l'animation
         
@@ -315,10 +332,10 @@ function openArticle(article, levelData) {
     window.scrollTo(0, 0); 
     
     // Réinitialiser Audio
-    window.speechSynthesis.cancel();
+    if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
     isPlaying = false;
     isPaused = false;
-    lastCharIndex = 0;
+    currentQueueIndex = 0; ttsQueue = [];
     updateAudioButtonUI();
     
     // Convertir automatiquement les liens Google Drive en liens d'image directs
@@ -336,7 +353,7 @@ function openArticle(article, levelData) {
     }
     
     articleTitle.textContent = levelData.title;
-    articleMeta.textContent = `${globalLevel} • ${article.category || '一般'}`;
+    articleMeta.innerHTML = `<span class="badge" style="font-size:0.9rem;">${globalLevel}</span> <span class="badge" style="background:#F2F2F7; color:#8E8E93; font-size:0.9rem;">${article.category || '一般'}</span>`;
     
     // Rendu initial sans surlignage
     renderArticleHTML(levelData.content, -1, 0);
@@ -483,7 +500,30 @@ function renderCurrentQuizQuestion() {
     quizContainer.appendChild(qDiv);
 }
 
-// 7. Lecteur Audio avec "Resume from current position" si on change la vitesse
+// 7. Lecteur Audio avec file d'attente (TTS Queue)
+const audioPanel = document.getElementById('audio-panel');
+const fabAudio = document.getElementById('fab-audio');
+const btnCloseAudio = document.getElementById('btn-close-audio');
+const audioProgressBar = document.getElementById('audio-progress-bar');
+
+
+function buildTtsQueue(text) {
+    ttsQueue = [];
+    let currentIndex = 0;
+    const regex = /[^.!?\n]+[.!?\n]*\s*/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        if (match[0].trim().length > 0) {
+            ttsQueue.push({
+                text: match[0],
+                start: currentIndex,
+                length: match[0].length
+            });
+        }
+        currentIndex += match[0].length;
+    }
+}
+
 function updateAudioButtonUI() {
     if (isPlaying && !isPaused) {
         btnPlayPause.innerHTML = `${iconPause} 一時停止`; 
@@ -501,67 +541,87 @@ function updateAudioButtonUI() {
         btnPlayPause.style.color = '#FFFFFF';
         btnRestart.classList.add('hidden');
     }
+    
+    // Update progress bar
+    if (ttsQueue.length > 0) {
+        const progress = ((currentQueueIndex) / ttsQueue.length) * 100;
+        audioProgressBar.style.width = `${progress}%`;
+    } else {
+        audioProgressBar.style.width = `0%`;
+    }
 }
 
-// startFromIndex permet de ne pas tout recommencer quand on change la vitesse
-function playAudio(startFromIndex = 0) {
-    if (isPaused) {
-        window.speechSynthesis.resume();
+function playNextInQueue() {
+    if (!isPlaying || isPaused) return;
+    
+    if (currentQueueIndex >= ttsQueue.length) {
+        isPlaying = false;
         isPaused = false;
-        isPlaying = true;
+        currentQueueIndex = 0;
         updateAudioButtonUI();
+        if (currentArticleData) renderArticleHTML(currentArticleData.content, -1, 0);
         return;
     }
+
+    const item = ttsQueue[currentQueueIndex];
+    updateAudioButtonUI();
     
-    window.speechSynthesis.cancel();
-    
-    if (!currentArticleData || !currentArticleData.content) return;
-    
-    const fullText = currentArticleData.content;
-    const textToSpeak = fullText.substring(startFromIndex);
-    
-    if (textToSpeak.trim() === "") return;
-    
-    currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
+    if (currentArticleData) renderArticleHTML(currentArticleData.content, item.start, item.length);
+
+    currentUtterance = new SpeechSynthesisUtterance(item.text);
     if (preferredVoice) currentUtterance.voice = preferredVoice;
     currentUtterance.lang = 'fr-FR'; 
     currentUtterance.rate = parseFloat(audioSpeedSelect.value); 
     
-    // Suivre la progression du mot en cours pour le surlignage
-    currentUtterance.onboundary = (event) => {
-        if (event.name === 'word') {
-            lastCharIndex = startFromIndex + event.charIndex;
-            
-            // Calculer la longueur du mot actuel
-            let length = event.charLength;
-            if (!length) {
-                const nextSpace = fullText.indexOf(' ', lastCharIndex);
-                length = nextSpace !== -1 ? nextSpace - lastCharIndex : fullText.length - lastCharIndex;
-            }
-            
-            // Mettre à jour l'affichage
-            renderArticleHTML(fullText, lastCharIndex, length);
+    currentUtterance.onend = () => {
+        if (isPlaying && !isPaused) {
+            currentQueueIndex++;
+            playNextInQueue();
         }
     };
     
-    currentUtterance.onend = () => {
+    currentUtterance.onerror = (e) => {
+        console.error("TTS Error:", e);
         isPlaying = false;
         isPaused = false;
-        lastCharIndex = 0;
         updateAudioButtonUI();
-        // Enlever le surlignage à la fin
-        renderArticleHTML(fullText, -1, 0);
+        if (currentArticleData) renderArticleHTML(currentArticleData.content, -1, 0);
     };
+
+    if (window.speechSynthesis && window.speechSynthesis.speak) window.speechSynthesis.speak(currentUtterance);
+}
+
+function playAudio(startIndex = -1) {
+    if (startIndex !== -1) {
+        currentQueueIndex = startIndex;
+    }
     
-    window.speechSynthesis.speak(currentUtterance);
+    if (isPaused) {
+        isPaused = false;
+        isPlaying = true;
+        updateAudioButtonUI();
+        playNextInQueue();
+        return;
+    }
+    
+    if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
+    
+    if (!currentArticleData || !currentArticleData.content) return;
+    
+    if (ttsQueue.length === 0) {
+        buildTtsQueue(currentArticleData.content);
+    }
+    
     isPlaying = true;
     isPaused = false;
     updateAudioButtonUI();
+    playNextInQueue();
 }
 
 function pauseAudio() {
-    window.speechSynthesis.pause();
     isPaused = true;
+    isPlaying = false;
+    if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel(); 
     updateAudioButtonUI();
 }
 
@@ -569,38 +629,69 @@ btnPlayPause.addEventListener('click', () => {
     if (isPlaying && !isPaused) {
         pauseAudio();
     } else {
-        playAudio(lastCharIndex);
+        playAudio();
     }
 });
 
 btnRestart.addEventListener('click', () => {
     isPaused = false;
     isPlaying = false;
-    lastCharIndex = 0;
-    window.speechSynthesis.cancel();
+    currentQueueIndex = 0;
+    if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
     if (currentArticleData) renderArticleHTML(currentArticleData.content, -1, 0);
-    setTimeout(() => { playAudio(0); }, 100);
+    setTimeout(() => { playAudio(); }, 100);
 });
 
-// Changement de vitesse sans reprendre au début
 audioSpeedSelect.addEventListener('change', () => {
     if (isPlaying) {
         isPaused = false;
         isPlaying = false;
-        window.speechSynthesis.cancel();
-        setTimeout(() => { playAudio(lastCharIndex); }, 100);
+        if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
+        setTimeout(() => { playAudio(currentQueueIndex); }, 100);
     }
+});
+
+// UI Bottom Sheet
+fabAudio.addEventListener('click', () => {
+    audioPanel.classList.add('visible');
+    fabAudio.style.opacity = '0';
+    fabAudio.style.pointerEvents = 'none';
+});
+
+btnCloseAudio.addEventListener('click', () => {
+    audioPanel.classList.remove('visible');
+    fabAudio.style.opacity = '1';
+    fabAudio.style.pointerEvents = 'auto';
 });
 
 // Bouton Retour
 backBtn.addEventListener('click', () => {
-    window.speechSynthesis.cancel();
+    if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
     if (currentArticleData) renderArticleHTML(currentArticleData.content, -1, 0);
     renderHome();
 });
 
 // Lancement
-window.addEventListener('DOMContentLoaded', initApp);
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
+
+
+// Gestion du bouton retour physique (Android)
+if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+    window.Capacitor.Plugins.App.addListener('backButton', () => {
+        if (!readingView.classList.contains('hidden')) {
+            if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
+            if (currentArticleData) renderArticleHTML(currentArticleData.content, -1, 0);
+            renderHome();
+        } else {
+            window.Capacitor.Plugins.App.exitApp();
+        }
+    });
+}
 
 // -----------------------------------------------------
 // Dictionnaire Interactif (Surlignage)
@@ -699,7 +790,7 @@ if (dictAudioBtn) {
         if (preferredVoice) utterance.voice = preferredVoice;
         // On lit à vitesse normale
         utterance.rate = 1.0; 
-        window.speechSynthesis.speak(utterance);
+        if (window.speechSynthesis && window.speechSynthesis.speak) window.speechSynthesis.speak(utterance);
     });
 }
 
@@ -921,7 +1012,7 @@ function renderSavedWords(listId) {
             const utterance = new SpeechSynthesisUtterance(textToRead);
             utterance.lang = 'fr-FR';
             if (preferredVoice) utterance.voice = preferredVoice;
-            window.speechSynthesis.speak(utterance);
+            if (window.speechSynthesis && window.speechSynthesis.speak) window.speechSynthesis.speak(utterance);
         });
     });
 
@@ -951,7 +1042,7 @@ function switchNav(activeBtn, viewToShow) {
     viewToShow.classList.remove('hidden');
     
     // 4. Couper l'audio en cours
-    window.speechSynthesis.cancel();
+    if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
     
     // 5. Cacher le bouton retour si on n'est pas dans un article
     if (viewToShow !== readingView) {
@@ -978,4 +1069,8 @@ if (navWords) {
             document.body.innerHTML += `<div style="position:fixed; top:0; left:0; right:0; background:red; color:white; z-index:9999; padding:20px;">ERREUR NAV: ${err.message} <br> ${err.stack}</div>`;
         }
     });
+}
+
+} catch(err) {
+  console.error('REAL ERROR:', err.message, err.stack); alert('REAL ERROR: ' + err.message + '\n' + err.stack);
 }
