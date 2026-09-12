@@ -48,32 +48,35 @@
                 <span id="article-meta">Date - Catégorie</span>
             </div>
             
-            <!-- Bouton Flottant Audio -->
-            <button id="fab-audio" class="fab-audio">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            </button>
+            
 
             <!-- Lecteur Audio (BottomSheet) -->
             <div id="audio-panel" class="audio-panel">
                 <div class="audio-panel-header">
                     <h4>音声読み上げ</h4>
-                    <button id="btn-close-audio" class="btn-close-audio">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                    </button>
+                    
                 </div>
                 
                 <div class="audio-progress-container">
                     <div id="audio-progress-bar" class="audio-progress-bar"></div>
                 </div>
 
-                <div class="audio-controls">
-                    <button id="btn-play-pause" class="btn-icon">
+                <div class="audio-controls" style="display: flex; gap: 10px; justify-content: center; align-items: center; width: 100%;">
+                    <button id="btn-restart" class="btn-icon" style="flex: 1; padding: 10px 5px; flex-direction: column; align-items: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"></path><path d="M3 8A9 9 0 1 1 12 21a9 9 0 0 1-9-9"></path></svg>
+                        最初から
+                    </button>
+                    <button id="btn-prev-sentence" class="btn-icon" style="flex: 1; padding: 10px 5px; flex-direction: column; align-items: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
+                        -1 文
+                    </button>
+                    <button id="btn-play-pause" class="btn-icon" style="flex: 1; padding: 10px 5px; background: var(--primary); color: white; border-radius: 12px; flex-direction: column; align-items: center;">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                         再生
                     </button>
-                    <button id="btn-restart" class="btn-icon hidden">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"></path><path d="M3 8A9 9 0 1 1 12 21a9 9 0 0 1-9-9"></path></svg>
-                        最初から
+                    <button id="btn-next-sentence" class="btn-icon" style="flex: 1; padding: 10px 5px; flex-direction: column; align-items: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
+                        +1 文
                     </button>
                 </div>
                 <div class="audio-options-row">
@@ -179,6 +182,6 @@
         </button>
     </nav>
 
-    <script src="app.js?v=9"></script>
+    <script src="app.js?v=10"></script>
 </body>
 </html>

@@ -96,9 +96,10 @@ const articleContent = document.getElementById('article-content');
 const quizSection = document.getElementById('quiz-section');
 const quizContainer = document.getElementById('quiz-container');
 
-// DOM Audio\nconst audioPanel = document.getElementById(\'audio-panel\');\nconst fabAudio = document.getElementById(\'fab-audio\');\nconst btnCloseAudio = document.getElementById(\'btn-close-audio\');\nconst audioProgressBar = document.getElementById(\'audio-progress-bar\');
 const btnPlayPause = document.getElementById('btn-play-pause');
 const btnRestart = document.getElementById('btn-restart');
+const btnPrevSentence = document.getElementById('btn-prev-sentence');
+const btnNextSentence = document.getElementById('btn-next-sentence');
 const audioSpeedSelect = document.getElementById('audio-speed-select');
 const audioVoiceSelect = document.getElementById('audio-voice-select');
 let allLocalFrVoices = [];
@@ -501,7 +502,6 @@ function renderCurrentQuizQuestion() {
 
 // 7. Lecteur Audio avec file d'attente (TTS Queue)
 const audioPanel = document.getElementById('audio-panel');
-const fabAudio = document.getElementById('fab-audio');
 const btnCloseAudio = document.getElementById('btn-close-audio');
 const audioProgressBar = document.getElementById('audio-progress-bar');
 
@@ -651,20 +651,12 @@ audioSpeedSelect.addEventListener('change', () => {
 });
 
 // UI Bottom Sheet
-fabAudio.addEventListener('click', () => {
-    audioPanel.classList.add('visible');
-    fabAudio.style.opacity = '0';
-    fabAudio.style.pointerEvents = 'none';
-});
 
-btnCloseAudio.addEventListener('click', () => {
-    audioPanel.classList.remove('visible');
-    fabAudio.style.opacity = '1';
-    fabAudio.style.pointerEvents = 'auto';
-});
 
 // Bouton Retour
 backBtn.addEventListener('click', () => {
+    document.querySelector('.bottom-nav').classList.remove('hidden');
+    audioPanel.classList.remove('visible');
     if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
     if (currentArticleData) renderArticleHTML(currentArticleData.content, -1, 0);
     renderHome();
@@ -1070,3 +1062,32 @@ if (navWords) {
     });
 }
 
+
+if (btnPrevSentence) {
+    btnPrevSentence.addEventListener('click', () => {
+        if (currentQueueIndex > 0) {
+            currentQueueIndex--;
+            if (isPlaying) {
+                if(window.speechSynthesis) window.speechSynthesis.cancel();
+                playNextInQueue();
+            } else {
+                updateProgressUI();
+                highlightCurrentSentence();
+            }
+        }
+    });
+}
+if (btnNextSentence) {
+    btnNextSentence.addEventListener('click', () => {
+        if (currentQueueIndex < ttsQueue.length - 1) {
+            currentQueueIndex++;
+            if (isPlaying) {
+                if(window.speechSynthesis) window.speechSynthesis.cancel();
+                playNextInQueue();
+            } else {
+                updateProgressUI();
+                highlightCurrentSentence();
+            }
+        }
+    });
+}
