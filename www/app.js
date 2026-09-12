@@ -184,7 +184,7 @@ function initVoices() {
                         displayName = `(男) ${maleCount}`;
                     } else {
                         otherCount++;
-                        displayName = `(他) ${otherCount}`;
+                        displayName = `(他) ${v.name.replace('fr-FR', '').replace('fr-fr', '').substring(0, 12)}`;
                     }
                     option.textContent = `声：${displayName}`;
                     audioVoiceSelect.appendChild(option);
