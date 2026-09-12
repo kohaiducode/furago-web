@@ -761,8 +761,11 @@ const translationCache = new Map(); // Cache pour mémoriser les traductions
   
   // --- GESTION DU CLIC / TAP SUR MOBILE (100% FIABLE) ---
   let isScrolling = false;
+  let tapStartTime = 0;
 
   document.addEventListener('touchstart', (e) => {
+      tapStartTime = Date.now();
+      isScrolling = false;
       isScrolling = false;
       // Fermer le popup si on touche ailleurs
       if (dictPopup && !dictPopup.contains(e.target) && !e.target.closest('.tap-word')) {
@@ -779,7 +782,10 @@ const translationCache = new Map(); // Cache pour mémoriser les traductions
       if (dictPopup && dictPopup.contains(e.target)) return;
 
       // Si l'utilisateur n'a pas fait défiler l'écran, c'est un Tap !
-      if (!isScrolling) {
+      const touchDuration = Date.now() - tapStartTime;
+      
+      // Si c'est un Tap rapide (moins de 350ms) et sans défilement
+      if (!isScrolling && touchDuration < 350) {
           let targetElement = e.target;
           if (targetElement && targetElement.nodeType === 3) targetElement = targetElement.parentElement;
           
