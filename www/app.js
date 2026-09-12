@@ -182,13 +182,42 @@ function initVoices() {
             if (allLocalFrVoices.length === 0) {
                 audioVoiceSelect.innerHTML = '<option value="">Voix par défaut</option>';
             } else {
-                allLocalFrVoices.forEach((v, index) => {
+                let femaleNames = ["Sophie", "Camille", "Léa", "Alice", "Emma"];
+                  let maleNames = ["Thomas", "Lucas", "Hugo", "Paul", "Arthur"];
+                  let fIdx = 0;
+                  let mIdx = 0;
+                  
+                  allLocalFrVoices.forEach((v, index) => {
                       const option = document.createElement('option');
                       option.value = index;
-                      let vName = v.name || v.voiceURI || "Inconnu";
                       
-                      // On affiche temporairement le VRAI nom système pour pouvoir les mapper
-                      option.textContent = `🎤 ${vName.substring(0, 30)}`;
+                      let identifier = (v.voiceURI || v.name || '').toLowerCase();
+                      let isFemale = false;
+                      let isMale = false;
+                      
+                      if (/vlf|vld|vla|fra|frc|female|femme/i.test(identifier)) {
+                          isFemale = true;
+                      } else if (/vle|vlc|vlb|frb|frd|male|homme/i.test(identifier)) {
+                          isMale = true;
+                      } else {
+                          // Fallback basé sur votre retour exact
+                          if (index === 0 || index === 1 || index === 3 || index === 5) {
+                              isFemale = true;
+                          } else {
+                              isMale = true;
+                          }
+                      }
+                      
+                      let displayName = "";
+                      if (isFemale) {
+                          displayName = `(女) ${femaleNames[fIdx % femaleNames.length]}`;
+                          fIdx++;
+                      } else {
+                          displayName = `(男) ${maleNames[mIdx % maleNames.length]}`;
+                          mIdx++;
+                      }
+                      
+                      option.textContent = displayName;
                       audioVoiceSelect.appendChild(option);
                   });
                 
