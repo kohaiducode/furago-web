@@ -156,10 +156,20 @@ function initVoices() {
             return;
         }
 
-        allLocalFrVoices = voices.filter(v => v.lang.startsWith('fr') && !v.name.includes('Google'));
-        if (allLocalFrVoices.length === 0) {
-            allLocalFrVoices = voices.filter(v => v.lang.startsWith('fr'));
-        }
+        allLocalFrVoices = voices.filter(v => {
+              const l = (v.lang || '').toLowerCase();
+              const n = (v.name || '').toLowerCase();
+              if (l.includes('fr-ca') || l.includes('canada') || n.includes('canada') || n.includes('canadien')) return false;
+              return l.startsWith('fr') && !v.name.includes('Google');
+          });
+          if (allLocalFrVoices.length === 0) {
+              allLocalFrVoices = voices.filter(v => {
+                  const l = (v.lang || '').toLowerCase();
+                  const n = (v.name || '').toLowerCase();
+                  if (l.includes('fr-ca') || l.includes('canada') || n.includes('canada') || n.includes('canadien')) return false;
+                  return l.startsWith('fr');
+              });
+          }
         
         if (audioVoiceSelect) {
             audioVoiceSelect.innerHTML = '';
