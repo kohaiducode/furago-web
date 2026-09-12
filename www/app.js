@@ -759,53 +759,33 @@ const translationCache = new Map(); // Cache pour mémoriser les traductions
 
 
   
-  // --- GESTION DU CLIC / TAP SUR MOBILE (100% FIABLE) ---
-  let isScrolling = false;
-  let tapStartTime = 0;
-
-  document.addEventListener('touchstart', (e) => {
-      tapStartTime = Date.now();
-      isScrolling = false;
-      isScrolling = false;
-      // Fermer le popup si on touche ailleurs
-      if (dictPopup && !dictPopup.contains(e.target) && !e.target.closest('.tap-word')) {
-          dictPopup.classList.add('hidden');
-      }
-  }, { passive: true });
-
-  document.addEventListener('touchmove', () => {
-      isScrolling = true;
-  }, { passive: true });
-
-  document.addEventListener('touchend', (e) => {
+  // --- GESTION DU CLIC / TAP SIMPLE SUR UN MOT ---
+  document.addEventListener('pointerup', (e) => {
       if (readingView.classList.contains('hidden')) return;
       if (dictPopup && dictPopup.contains(e.target)) return;
 
-      // Si l'utilisateur n'a pas fait défiler l'écran, c'est un Tap !
-      const touchDuration = Date.now() - tapStartTime;
+      // Si du texte est déjà sélectionné nativement, on ne fait rien ici (laissé à selectionchange)
+      const sel = window.getSelection();
+      if (sel && sel.toString().trim().length > 0) {
+          return;
+      }
+
+      // S'il n'y a pas de sélection, c'est un Tap pur !
+      let targetElement = e.target;
+      if (targetElement && targetElement.nodeType === 3) targetElement = targetElement.parentElement;
       
-      // Si c'est un Tap rapide (moins de 350ms) et sans défilement
-      if (!isScrolling && touchDuration < 350) {
-          let targetElement = e.target;
-          if (targetElement && targetElement.nodeType === 3) targetElement = targetElement.parentElement;
-          
-          let wordElement = targetElement ? (targetElement.closest ? targetElement.closest('.tap-word') : null) : null;
-          if (wordElement) {
-              // C'est un tap direct sur un mot
-              
-              // On annule la sélection native
-              const sel = window.getSelection();
-              if (sel) sel.removeAllRanges();
-              
-              let text = wordElement.textContent.trim();
-              let rect = wordElement.getBoundingClientRect();
-              
-              showDictionaryPopup(text, rect);
-              
-              // Empêche le comportement par défaut (comme la sélection native indésirable)
-              if (e.cancelable) e.preventDefault();
-              return;
-          }
+      let wordElement = targetElement ? (targetElement.closest ? targetElement.closest('.tap-word') : null) : null;
+      if (wordElement) {
+          let text = wordElement.textContent.trim();
+          let rect = wordElement.getBoundingClientRect();
+          showDictionaryPopup(text, rect);
+      }
+  });
+
+  // Cacher le popup si on touche l'écran ailleurs (pointerdown)
+  document.addEventListener('pointerdown', (e) => {
+      if (dictPopup && !dictPopup.contains(e.target) && !e.target.closest('.tap-word')) {
+          dictPopup.classList.add('hidden');
       }
   });
 
