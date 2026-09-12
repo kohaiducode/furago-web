@@ -757,43 +757,61 @@ const dictAudioBtn = document.getElementById('dict-audio-btn');
 let currentDictText = "";
 const translationCache = new Map(); // Cache pour mémoriser les traductions
 
-// Fermer le popup si on clique ailleurs
+
+  
+  // Gestion avancée du "Tap" pour éviter les conflits avec la sélection native Android
+  let tapStartX = 0;
+  let tapStartY = 0;
+  let tapStartTime = 0;
+
   document.addEventListener('pointerdown', (e) => {
-      if (dictPopup && !dictPopup.contains(e.target)) {
+      tapStartX = e.clientX;
+      tapStartY = e.clientY;
+      tapStartTime = Date.now();
+      
+      // Fermer le popup si on clique ailleurs
+      if (dictPopup && !dictPopup.contains(e.target) && !e.target.closest('.tap-word')) {
           dictPopup.classList.add('hidden');
       }
   });
-  
-  // 1. Gérer le clic simple sur un mot (tap-word) pour Android et Web
-  document.addEventListener('click', (e) => {
-      if (readingView.classList.contains('hidden')) return;
-      if (dictPopup && dictPopup.contains(e.target)) return;
-      
-      let targetElement = e.target;
-      if (targetElement && targetElement.nodeType === 3) targetElement = targetElement.parentElement;
-      
-      let wordElement = targetElement ? (targetElement.closest ? targetElement.closest('.tap-word') : null) : null;
-      if (wordElement) {
-          let text = wordElement.textContent.trim();
-          let rect = wordElement.getBoundingClientRect();
-          showDictionaryPopup(text, rect);
-      }
-  });
 
-  // 2. Gérer la sélection manuelle de texte (glisser ou appui long)
   document.addEventListener('pointerup', (e) => {
       if (readingView.classList.contains('hidden')) return;
       if (dictPopup && dictPopup.contains(e.target)) return;
 
+      const tapEndTime = Date.now();
+      const distance = Math.hypot(e.clientX - tapStartX, e.clientY - tapStartY);
+      const timeElapsed = tapEndTime - tapStartTime;
+
+      // 1. Détection d'un "Tap" intentionnel (rapide et sans défilement)
+      if (timeElapsed < 450 && distance < 15) {
+          let targetElement = e.target;
+          if (targetElement && targetElement.nodeType === 3) targetElement = targetElement.parentElement;
+          
+          let wordElement = targetElement ? (targetElement.closest ? targetElement.closest('.tap-word') : null) : null;
+          if (wordElement) {
+              // C'est un tap ! On annule la sélection native d'Android pour cacher le menu "Copy/Share"
+              window.getSelection().removeAllRanges();
+              
+              let text = wordElement.textContent.trim();
+              let rect = wordElement.getBoundingClientRect();
+              showDictionaryPopup(text, rect);
+              return; // On arrête ici pour ne pas déclencher le mode sélection manuelle
+          }
+      }
+
+      // 2. Détection de la sélection manuelle (Glisser ou Appui long)
       setTimeout(() => {
           const selection = window.getSelection();
           const text = selection.toString().trim();
+          
+          // Si l'utilisateur a vraiment surligné du texte (ex: 2 mots)
           if (text && text.length > 0 && text.length <= 50) {
               const range = selection.getRangeAt(0);
               const rect = range.getBoundingClientRect();
               showDictionaryPopup(text, rect);
           }
-      }, 100);
+      }, 150);
   });
 
   // Fonction commune pour afficher le popup et traduire
