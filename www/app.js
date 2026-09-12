@@ -166,29 +166,40 @@ function initVoices() {
             if (allLocalFrVoices.length === 0) {
                 audioVoiceSelect.innerHTML = '<option value="">Voix par défaut</option>';
             } else {
-                let maleCount = 0;
-                let femaleCount = 0;
-                let otherCount = 0;
-                
-                allLocalFrVoices.forEach((v, index) => {
-                    const option = document.createElement('option');
-                    option.value = index;
-                    let vName = v.name.toLowerCase();
-                    let displayName = "";
-                    
-                    if (/hortense|julie|amelie|audrey|aurelie|alice|léa|roxane|carmit|vlf|vld|vla|female/i.test(vName)) {
-                        femaleCount++;
-                        displayName = `(女) ${femaleCount}`;
-                    } else if (/paul|thomas|nicolas|david|henri|martin|claude|bernard|vle|vlc|vlb|male/i.test(vName)) {
-                        maleCount++;
-                        displayName = `(男) ${maleCount}`;
-                    } else {
-                        otherCount++;
-                        displayName = `(他) ${v.name.replace('fr-FR', '').replace('fr-fr', '').substring(0, 12)}`;
-                    }
-                    option.textContent = `声：${displayName}`;
-                    audioVoiceSelect.appendChild(option);
-                });
+                let femaleNames = ["Sophie", "Camille", "Léa", "Alice", "Emma"];
+                  let maleNames = ["Thomas", "Lucas", "Hugo", "Paul", "Arthur"];
+                  let fIdx = 0;
+                  let mIdx = 0;
+                  
+                  allLocalFrVoices.forEach((v, index) => {
+                      const option = document.createElement('option');
+                      option.value = index;
+                      let vName = v.name.toLowerCase();
+                      let isFemale = false;
+                      let isMale = false;
+                      
+                      if (/hortense|julie|amelie|audrey|aurelie|alice|léa|roxane|carmit|vlf|vld|vla|female|femme/i.test(vName)) {
+                          isFemale = true;
+                      } else if (/paul|thomas|nicolas|david|henri|martin|claude|bernard|vle|vlc|vlb|male|homme/i.test(vName)) {
+                          isMale = true;
+                      } else {
+                          // Si le système ne donne pas d'indice, on alterne Femme/Homme (typiquement Android)
+                          if (index % 2 === 0) isFemale = true;
+                          else isMale = true;
+                      }
+                      
+                      let displayName = "";
+                      if (isFemale) {
+                          displayName = `(女) ${femaleNames[fIdx % femaleNames.length]}`;
+                          fIdx++;
+                      } else {
+                          displayName = `(男) ${maleNames[mIdx % maleNames.length]}`;
+                          mIdx++;
+                      }
+                      
+                      option.textContent = displayName;
+                      audioVoiceSelect.appendChild(option);
+                  });
                 
                 if (!preferredVoice) {
                     preferredVoice = allLocalFrVoices[0];
