@@ -188,6 +188,9 @@ function initVoices() {
                   let mIdx = 0;
                   
                   allLocalFrVoices.forEach((v, index) => {
+                      // Retire la voix d'Alice (index 5) car c'est un doublon
+                      if (index === 5) return;
+                      
                       const option = document.createElement('option');
                       option.value = index;
                       
