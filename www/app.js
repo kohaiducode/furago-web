@@ -759,59 +759,70 @@ const translationCache = new Map(); // Cache pour mémoriser les traductions
 
 
   
-  // Gestion avancée du "Tap" pour éviter les conflits avec la sélection native Android
-  let tapStartX = 0;
-  let tapStartY = 0;
-  let tapStartTime = 0;
+  // --- GESTION DU CLIC / TAP SUR MOBILE (100% FIABLE) ---
+  let isScrolling = false;
 
-  document.addEventListener('pointerdown', (e) => {
-      tapStartX = e.clientX;
-      tapStartY = e.clientY;
-      tapStartTime = Date.now();
-      
-      // Fermer le popup si on clique ailleurs
+  document.addEventListener('touchstart', (e) => {
+      isScrolling = false;
+      // Fermer le popup si on touche ailleurs
       if (dictPopup && !dictPopup.contains(e.target) && !e.target.closest('.tap-word')) {
           dictPopup.classList.add('hidden');
       }
-  });
+  }, { passive: true });
 
-  document.addEventListener('pointerup', (e) => {
+  document.addEventListener('touchmove', () => {
+      isScrolling = true;
+  }, { passive: true });
+
+  document.addEventListener('touchend', (e) => {
       if (readingView.classList.contains('hidden')) return;
       if (dictPopup && dictPopup.contains(e.target)) return;
 
-      const tapEndTime = Date.now();
-      const distance = Math.hypot(e.clientX - tapStartX, e.clientY - tapStartY);
-      const timeElapsed = tapEndTime - tapStartTime;
-
-      // 1. Détection d'un "Tap" intentionnel (rapide et sans défilement)
-      if (timeElapsed < 450 && distance < 15) {
+      // Si l'utilisateur n'a pas fait défiler l'écran, c'est un Tap !
+      if (!isScrolling) {
           let targetElement = e.target;
           if (targetElement && targetElement.nodeType === 3) targetElement = targetElement.parentElement;
           
           let wordElement = targetElement ? (targetElement.closest ? targetElement.closest('.tap-word') : null) : null;
           if (wordElement) {
-              // C'est un tap ! On annule la sélection native d'Android pour cacher le menu "Copy/Share"
-              window.getSelection().removeAllRanges();
+              // C'est un tap direct sur un mot
+              
+              // On annule la sélection native
+              const sel = window.getSelection();
+              if (sel) sel.removeAllRanges();
               
               let text = wordElement.textContent.trim();
               let rect = wordElement.getBoundingClientRect();
+              
               showDictionaryPopup(text, rect);
-              return; // On arrête ici pour ne pas déclencher le mode sélection manuelle
+              
+              // Empêche le comportement par défaut (comme la sélection native indésirable)
+              if (e.cancelable) e.preventDefault();
+              return;
           }
       }
+  });
 
-      // 2. Détection de la sélection manuelle (Glisser ou Appui long)
-      setTimeout(() => {
-          const selection = window.getSelection();
-          const text = selection.toString().trim();
-          
-          // Si l'utilisateur a vraiment surligné du texte (ex: 2 mots)
-          if (text && text.length > 0 && text.length <= 50) {
-              const range = selection.getRangeAt(0);
-              const rect = range.getBoundingClientRect();
-              showDictionaryPopup(text, rect);
-          }
-      }, 150);
+  // Gérer la sélection manuelle de texte (Glisser ou Appui long)
+  // On utilise selectionchange qui est beaucoup plus fiable sur mobile
+  document.addEventListener('selectionchange', () => {
+      if (readingView.classList.contains('hidden')) return;
+      
+      const selection = window.getSelection();
+      const text = selection.toString().trim();
+      
+      // Si l'utilisateur a vraiment surligné du texte (ex: 2 mots)
+      if (text && text.length > 0 && text.length <= 50) {
+          // Petit délai pour s'assurer que la sélection est finie
+          setTimeout(() => {
+              const latestText = window.getSelection().toString().trim();
+              if (latestText === text) {
+                  const range = window.getSelection().getRangeAt(0);
+                  const rect = range.getBoundingClientRect();
+                  showDictionaryPopup(latestText, rect);
+              }
+          }, 400);
+      }
   });
 
   // Fonction commune pour afficher le popup et traduire
