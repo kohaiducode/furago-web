@@ -325,6 +325,8 @@ function renderHome() {
 
 // 5. Ouvrir l'article
 function openArticle(article, levelData) {
+    document.querySelector('.bottom-nav').classList.add('hidden');
+    document.getElementById('audio-panel').classList.add('visible');
     currentArticleData = levelData;
     homeView.classList.add('hidden');
     readingView.classList.remove('hidden');
