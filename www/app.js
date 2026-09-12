@@ -68,8 +68,8 @@ let currentQuizIndex = 0;
 let currentQuizScore = 0;
 
 // Icônes SVG
-const iconPlay = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
-const iconPause = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
+const iconPlay = `<svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+const iconPause = `<svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
 
 // Éléments DOM
 const loader = document.getElementById('loader');
@@ -527,20 +527,20 @@ function buildTtsQueue(text) {
 
 function updateAudioButtonUI() {
     if (isPlaying && !isPaused) {
-        btnPlayPause.innerHTML = `${iconPause} 一時停止`; 
+        btnPlayPause.innerHTML = `${iconPause}`; 
         btnPlayPause.style.background = '#FF9500'; 
         btnPlayPause.style.color = '#FFFFFF';
-        btnRestart.classList.remove('hidden');
+        
     } else if (isPaused) {
-        btnPlayPause.innerHTML = `${iconPlay} 再開`; 
+        btnPlayPause.innerHTML = `${iconPlay}`; 
         btnPlayPause.style.background = '#34C759'; 
         btnPlayPause.style.color = '#FFFFFF';
-        btnRestart.classList.remove('hidden');
+        
     } else {
-        btnPlayPause.innerHTML = `${iconPlay} 再生`; 
+        btnPlayPause.innerHTML = `${iconPlay}`; 
         btnPlayPause.style.background = '#5E5CE6'; 
         btnPlayPause.style.color = '#FFFFFF';
-        btnRestart.classList.add('hidden');
+        
     }
     
     // Update progress bar
@@ -930,14 +930,14 @@ function renderListsOverview() {
         card.innerHTML = `
             <div style="display:flex; align-items:center; gap:12px;">
                 <div style="background:var(--primary-light); color:var(--primary); width:40px; height:40px; border-radius:8px; display:flex; justify-content:center; align-items:center;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
                 </div>
                 <div>
                     <h3 style="color:var(--text-main); font-size:1.1rem; margin-bottom:2px;">${list.name}</h3>
                     <span style="color:var(--text-muted); font-size:0.85rem;">${wordsInList.length} mots</span>
                 </div>
             </div>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
         `;
         
         card.addEventListener('click', () => {
