@@ -117,6 +117,13 @@ async function initApp() {
         
         currentArticles = data.articles.filter(a => Object.keys(a.levels).length > 0);
         
+        // Sort articles by date descending (newest first)
+        currentArticles.sort((a, b) => {
+            const dateA = a.date ? new Date(a.date).getTime() : 0;
+            const dateB = b.date ? new Date(b.date).getTime() : 0;
+            return dateB - dateA;
+        });
+        
         currentArticles.forEach(a => {
             if (a.category) categories.add(a.category.trim());
         });
