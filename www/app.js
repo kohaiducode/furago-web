@@ -8,11 +8,15 @@ if (typeof window.speechSynthesis === 'undefined') {
             if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech) {
                 try {
                     if (utterance.onstart) utterance.onstart();
-                    await window.Capacitor.Plugins.TextToSpeech.speak({
+                    let opts = {
                         text: utterance.text,
                         lang: utterance.lang || 'fr-FR',
                         rate: utterance.rate || 1.0,
-                    });
+                    };
+                    if (utterance.voice && utterance.voice._originalIndex !== undefined) {
+                        opts.voice = utterance.voice._originalIndex;
+                    }
+                    await window.Capacitor.Plugins.TextToSpeech.speak(opts);
                     if (utterance.onend) utterance.onend();
                 } catch(e) {
                     console.error("TTS Plugin Error:", e);
@@ -68,8 +72,8 @@ let currentQuizIndex = 0;
 let currentQuizScore = 0;
 
 // Icônes SVG
-const iconPlay = `<svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
-const iconPause = `<svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
+const iconPlay = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+const iconPause = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
 
 // Éléments DOM
 const loader = document.getElementById('loader');
@@ -130,11 +134,13 @@ async function initApp() {
 function initVoices() {
     const loadVoices = async () => {
         let voices = (window.speechSynthesis && window.speechSynthesis.getVoices) ? window.speechSynthesis.getVoices() : [];
+          voices.forEach((v, i) => v._originalIndex = i);
         
         if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech) {
             try {
                 const res = await window.Capacitor.Plugins.TextToSpeech.getSupportedVoices();
                 if (res && res.voices) voices = res.voices;
+                  voices.forEach((v, i) => v._originalIndex = i);
             } catch(e) { console.error(e); }
         }
 
@@ -163,15 +169,15 @@ function initVoices() {
                     let vName = v.name.toLowerCase();
                     let displayName = "";
                     
-                    if (/hortense|julie|amelie|audrey|aurelie|alice|léa|roxane|carmit/i.test(vName)) {
+                    if (/hortense|julie|amelie|audrey|aurelie|alice|léa|roxane|carmit|vlf|vld|vla|female/i.test(vName)) {
                         femaleCount++;
-                        displayName = `女性 ${femaleCount}`;
-                    } else if (/paul|thomas|nicolas|david|henri|martin|claude|bernard/i.test(vName)) {
+                        displayName = `(女) ${femaleCount}`;
+                    } else if (/paul|thomas|nicolas|david|henri|martin|claude|bernard|vle|vlc|vlb|male/i.test(vName)) {
                         maleCount++;
-                        displayName = `男性 ${maleCount}`;
+                        displayName = `(男) ${maleCount}`;
                     } else {
                         otherCount++;
-                        displayName = `音声 ${otherCount}`;
+                        displayName = `(他) ${otherCount}`;
                     }
                     option.textContent = `声：${displayName}`;
                     audioVoiceSelect.appendChild(option);
@@ -308,13 +314,17 @@ function renderHome() {
             ? `<div class="article-image-container"><img src="${finalImageUrl}" alt=""></div>` 
             : '';
         
+        const dateFormatted = article.date ? new Date(article.date).toLocaleDateString('ja-JP') : '';
+        const dateHtml = dateFormatted ? `<span style="color:#8E8E93; font-size: 0.8rem; margin-left: auto;">${dateFormatted}</span>` : '';
+        
         li.innerHTML = `
             ${imgHtml}
             <div class="article-card-content">
-                <h3>${displayTitle}</h3>
-                <p class="meta">
+                <h3 style="margin-bottom: 8px;">${displayTitle}</h3>
+                <p class="meta" style="display:flex; align-items:center; gap:6px; margin: 0;">
                     <span class="badge">${globalLevel}</span> 
                     <span class="badge" style="background:#F2F2F7; color:#8E8E93;">${article.category || '一般'}</span>
+                    ${dateHtml}
                 </p>
             </div>
         `;
@@ -355,7 +365,13 @@ function openArticle(article, levelData) {
     }
     
     articleTitle.textContent = levelData.title;
-    articleMeta.innerHTML = `<span class="badge" style="font-size:0.9rem;">${globalLevel}</span> <span class="badge" style="background:#F2F2F7; color:#8E8E93; font-size:0.9rem;">${article.category || '一般'}</span>`;
+    const dateFormatted = article.date ? new Date(article.date).toLocaleDateString('ja-JP') : '';
+    const dateHtml = dateFormatted ? `<span style="color:#8E8E93; font-size: 0.85rem; margin-left: auto;">${dateFormatted}</span>` : '';
+    articleMeta.style.display = 'flex';
+    articleMeta.style.alignItems = 'center';
+    articleMeta.style.gap = '8px';
+    articleMeta.style.marginTop = '12px';
+    articleMeta.innerHTML = `<span class="badge" style="font-size:0.9rem;">${globalLevel}</span> <span class="badge" style="background:#F2F2F7; color:#8E8E93; font-size:0.9rem;">${article.category || '一般'}</span>${dateHtml}`;
     
     // Rendu initial sans surlignage
     renderArticleHTML(levelData.content, -1, 0);
