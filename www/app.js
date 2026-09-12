@@ -384,6 +384,9 @@ function openArticle(article, levelData) {
     backBtn.classList.remove('hidden');
     window.scrollTo(0, 0); 
     
+    // Précharger les modèles de traduction ML Kit (silencieux)
+    if (typeof preloadMLKitModels === 'function') preloadMLKitModels();
+    
     // Réinitialiser Audio
     if (window.speechSynthesis && window.speechSynthesis.cancel) window.speechSynthesis.cancel();
     isPlaying = false;
@@ -762,20 +765,34 @@ document.addEventListener('pointerdown', (e) => {
 });
 
 // Ne déclencher la traduction QUE lorsqu'on relâche la souris/le doigt
+// Ne déclencher la traduction QUE lorsqu'on relâche la souris/le doigt, ou qu'on clique sur un mot
 document.addEventListener('pointerup', (e) => {
     if (readingView.classList.contains('hidden')) return;
-    if (dictPopup && dictPopup.contains(e.target)) return; // Ignorer les clics sur le bouton audio
+    if (dictPopup && dictPopup.contains(e.target)) return; // Ignorer les clics sur le popup
 
     setTimeout(async () => {
-        const selection = window.getSelection();
-        const text = selection.toString().trim();
+        let text = "";
+        let rect = null;
 
-        if (!text || text.length === 0 || text.length > 50) return;
+        // 1. Vérifier si l'utilisateur a tapé sur un mot (Single Tap)
+        let wordElement = e.target.closest('.tap-word');
+        if (wordElement) {
+            text = wordElement.textContent.trim();
+            rect = wordElement.getBoundingClientRect();
+        } else {
+            // 2. Fallback: Vérifier si l'utilisateur a sélectionné manuellement du texte
+            const selection = window.getSelection();
+            text = selection.toString().trim();
+            if (text && text.length > 0 && text.length <= 50) {
+                const range = selection.getRangeAt(0);
+                rect = range.getBoundingClientRect();
+            }
+        }
 
-        // Calcul de la position
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        if (rect.width === 0 && rect.height === 0) return;
+        if (!text || text.length === 0 || text.length > 50 || !rect || (rect.width === 0 && rect.height === 0)) {
+            // Rien sélectionné
+            return;
+        }
 
         dictWord.textContent = text;
         currentDictText = text;
@@ -799,7 +816,7 @@ document.addEventListener('pointerup', (e) => {
         dictPopup.style.top = `${topPos}px`;
         dictPopup.style.left = `${leftPos}px`;
 
-        // Utilisation du cache pour éviter de spammer l'API
+        // Utilisation du cache
         const cacheKey = text.toLowerCase();
         if (translationCache.has(cacheKey)) {
             dictTranslation.textContent = translationCache.get(cacheKey);
@@ -808,26 +825,52 @@ document.addEventListener('pointerup', (e) => {
 
         dictTranslation.innerHTML = '<span style="color:#8E8E93; font-size:0.9rem;">翻訳中...</span>';
 
-        // Appel API uniquement si pas en cache
         try {
-            // On utilise "client=dict-chrome-ex" qui a des limites beaucoup plus souples
-            const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(text)}`);
-            if (!res.ok) throw new Error("API Limit");
-            const data = await res.json();
-            const translation = data[0].map(item => item[0]).join('');
+            let translationStr = "";
+
+            // Tente d'utiliser Google ML Kit (Traduction native, hors-ligne et gratuite)
+            if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Translation) {
+                try {
+                    const resML = await window.Capacitor.Plugins.Translation.translate({
+                        text: text,
+                        sourceLanguage: 'fr',
+                        targetLanguage: 'ja'
+                    });
+                    if (resML && resML.text) {
+                        translationStr = resML.text;
+                    }
+                } catch (mlErr) {
+                    console.log("ML Kit unavailable or model not downloaded, falling back to API.", mlErr);
+                }
+            }
+
+            // Fallback API Chrome Extension
+            if (!translationStr) {
+                const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(text)}`);
+                if (!res.ok) throw new Error("API Limit");
+                const data = await res.json();
+                translationStr = data[0].map(item => item[0]).join('');
+            }
             
-            dictTranslation.textContent = translation;
-            translationCache.set(cacheKey, translation); // Sauvegarde dans le cache
+            dictTranslation.textContent = translationStr;
+            translationCache.set(cacheKey, translationStr); // Sauvegarde dans le cache
             
             if (!dictPopup.classList.contains('arrow-top')) {
                 dictPopup.style.top = `${rect.top + window.scrollY - dictPopup.offsetHeight - 14}px`;
             }
         } catch (err) {
-            dictTranslation.textContent = '一時的な制限 (Trop de requêtes)';
+            dictTranslation.textContent = '一時的な制陁E(Trop de requêtes)';
         }
-    }, 150); // Léger délai pour s'assurer que la sélection système est finie
+    }, 50); // Petit délai pour laisser le clic se résoudre
 });
 
+// Téléchargement des modèles ML Kit en arrière-plan à l'ouverture d'un article
+function preloadMLKitModels() {
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Translation) {
+        window.Capacitor.Plugins.Translation.downloadModel({ language: 'fr' }).catch(() => {});
+        window.Capacitor.Plugins.Translation.downloadModel({ language: 'ja' }).catch(() => {});
+    }
+}
 // Écouter le bouton audio du dictionnaire
 if (dictAudioBtn) {
     dictAudioBtn.addEventListener('click', (e) => {
