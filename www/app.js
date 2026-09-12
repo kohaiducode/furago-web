@@ -1,4 +1,3 @@
-try {
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
 
 // Polyfill pour éviter les crashs si speechSynthesis n'est pas supporté (ex: certains WebViews Android)
@@ -1071,6 +1070,3 @@ if (navWords) {
     });
 }
 
-} catch(err) {
-  console.error('REAL ERROR:', err.message, err.stack); alert('REAL ERROR: ' + err.message + '\n' + err.stack);
-}
