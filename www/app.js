@@ -770,12 +770,19 @@ document.addEventListener('pointerup', (e) => {
     if (readingView.classList.contains('hidden')) return;
     if (dictPopup && dictPopup.contains(e.target)) return; // Ignorer les clics sur le popup
 
+    // Capturer la cible AVANT le setTimeout pour éviter qu'elle soit perdue
+    let targetElement = e.target;
+    // Si c'est un noeud de texte (nodeType 3), on prend le parent (le span)
+    if (targetElement && targetElement.nodeType === 3) {
+        targetElement = targetElement.parentElement;
+    }
+
     setTimeout(async () => {
         let text = "";
         let rect = null;
 
         // 1. Vérifier si l'utilisateur a tapé sur un mot (Single Tap)
-        let wordElement = e.target.closest('.tap-word');
+        let wordElement = targetElement ? (targetElement.closest ? targetElement.closest('.tap-word') : null) : null;
         if (wordElement) {
             text = wordElement.textContent.trim();
             rect = wordElement.getBoundingClientRect();
