@@ -137,6 +137,7 @@ let allLocalFrVoices = [];
 // 1. Initialisation
 async function initApp() {
   initVoices();
+  DictionaryService.init();
   try {
     const response = await fetch(DATA_URL);
     const data = await response.json();
@@ -889,6 +890,73 @@ const dictAudioBtn = document.getElementById("dict-audio-btn");
 let currentDictText = "";
 const translationCache = new Map(); // Cache pour mémoriser les traductions
 
+// -----------------------------------------------------
+// 0. DICTIONARY SERVICE (OFFLINE)
+// -----------------------------------------------------
+const DictionaryService = {
+  db: null,
+  isLoaded: false,
+
+  async init() {
+    try {
+      console.log("Loading offline dictionary...");
+      const res = await fetch("assets/dict.json");
+      this.db = await res.json();
+      this.isLoaded = true;
+      console.log("Offline dictionary loaded successfully.");
+    } catch (e) {
+      console.error("Failed to load offline dictionary", e);
+    }
+  },
+
+  async lookupWord(word, surroundingSentence) {
+    let cleanWord = word
+      .toLowerCase()
+      .replace(/[.,!?:;"'()[\]]/g, "")
+      .trim();
+    cleanWord = cleanWord.replace(/^(l'|d'|qu'|j'|m'|t'|s'|n'|c'|ç')/, "");
+
+    let definitions = [];
+    let posTags = [];
+
+    if (this.isLoaded && this.db && this.db[cleanWord]) {
+      const entries = this.db[cleanWord];
+      entries.forEach((entry) => {
+        let jpWords = [...(entry.k || []), ...(entry.r || [])].filter((x) => x);
+        let jpTitle = jpWords.join(" / ");
+        let gloss = (entry.g || []).join(", ");
+        definitions.push(`【${jpTitle}】 ${gloss}`);
+        if (entry.p) posTags.push(...entry.p);
+      });
+    }
+
+    posTags = [...new Set(posTags)];
+    let nature = posTags.length > 0 ? posTags.join(", ") : "inconnu";
+
+    let traductionPhrase = "翻訳中...";
+    try {
+      const result = await Capacitor.Plugins.Translation.translate({
+        text: surroundingSentence,
+        sourceLanguage: "fr",
+        targetLanguage: "ja",
+      });
+      traductionPhrase = result.translatedText;
+    } catch (e) {
+      console.error("ML Kit Error", e);
+      traductionPhrase = "文脈の翻訳エラー";
+    }
+
+    return {
+      mot: cleanWord,
+      phraseOriginale: surroundingSentence,
+      traductionPhrase: traductionPhrase,
+      nature: nature,
+      definitions: definitions,
+      originalWord: word,
+    };
+  },
+};
+
 // --- GESTION DU CLIC / TAP SIMPLE SUR UN MOT ---
 let tapStartX = 0;
 let tapStartY = 0;
@@ -932,7 +1000,13 @@ document.addEventListener("pointerup", (e) => {
     if (e.cancelable) e.preventDefault();
     let text = wordElement.textContent.trim();
     let rect = wordElement.getBoundingClientRect();
-    showDictionaryPopup(text, rect);
+
+    const paragraphText = wordElement.parentElement.textContent || "";
+    const sentences = paragraphText.split(/(?<=[.!?])\s+/);
+    let surroundingSentence =
+      sentences.find((s) => s.includes(text)) || paragraphText;
+
+    showDictionaryPopup(text, surroundingSentence, rect);
   }
 });
 
@@ -959,7 +1033,9 @@ document.addEventListener("selectionchange", () => {
 });
 
 // Fonction commune pour afficher le popup et traduire
-async function showDictionaryPopup(text, rect) {
+let currentDictData = null;
+
+async function showDictionaryPopup(text, surroundingSentence, rect) {
   if (
     !text ||
     text.length === 0 ||
@@ -972,8 +1048,11 @@ async function showDictionaryPopup(text, rect) {
     dictSaveBtn.style.color = "";
     dictSaveBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
   }
+
   dictWord.textContent = text;
-  currentDictText = text;
+  dictTranslation.innerHTML =
+    '<div style="font-size:0.9rem; color:var(--text-muted);">翻訳中...</div>';
+
   dictPopup.classList.remove("hidden");
 
   let topPos = rect.top + window.scrollY - dictPopup.offsetHeight - 14;
@@ -986,61 +1065,48 @@ async function showDictionaryPopup(text, rect) {
 
   if (topPos < window.scrollY + 10) {
     topPos = rect.bottom + window.scrollY + 14;
-    dictPopup.classList.add("arrow-top");
+    dictPopup.classList.add("bottom-mode");
   } else {
-    dictPopup.classList.remove("arrow-top");
+    dictPopup.classList.remove("bottom-mode");
   }
 
-  dictPopup.style.top = `${topPos}px`;
-  dictPopup.style.left = `${leftPos}px`;
+  dictPopup.style.top = topPos + "px";
+  dictPopup.style.left = leftPos + "px";
 
-  const cacheKey = text.toLowerCase();
-  if (translationCache.has(cacheKey)) {
-    dictTranslation.textContent = translationCache.get(cacheKey);
-    return;
+  const data = await DictionaryService.lookupWord(text, surroundingSentence);
+  currentDictData = data;
+  currentDictText = data.mot;
+
+  let html = `
+      <div style="margin-bottom: 8px;">
+        <span style="background: var(--primary-light); color: var(--primary); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-right: 8px;">${data.nature}</span>
+        <span style="font-weight: bold; font-size: 1.1rem;">${data.mot}</span>
+      </div>
+      <div style="background: var(--surface); padding: 8px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--primary); font-size: 0.95rem; color: var(--text-main);">
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">文脈 (Contexte)</div>
+        ${data.traductionPhrase}
+      </div>
+    `;
+
+  if (data.definitions.length > 0) {
+    html += `<div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; margin-top: 12px; text-transform: uppercase;">辞書 (Dictionnaire)</div>`;
+    html += `<ul style="margin: 0; padding-left: 16px; font-size: 0.9rem; color: var(--text-main);">`;
+    data.definitions.forEach((d) => {
+      html += `<li style="margin-bottom: 4px;">${d}</li>`;
+    });
+    html += `</ul>`;
+  } else {
+    html += `<div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic; margin-top: 12px;">辞書に定義が見つかりませんでした。</div>`;
   }
 
-  dictTranslation.innerHTML =
-    '<span style="color:#8E8E93; font-size:0.9rem;">翻訳中...</span>';
+  dictTranslation.innerHTML = html;
 
-  try {
-    let translationStr = "";
-
-    if (
-      window.Capacitor &&
-      window.Capacitor.Plugins &&
-      window.Capacitor.Plugins.Translation
-    ) {
-      try {
-        const resML = await window.Capacitor.Plugins.Translation.translate({
-          text: text,
-          sourceLanguage: "fr",
-          targetLanguage: "ja",
-        });
-        if (resML && resML.text) translationStr = resML.text;
-      } catch (mlErr) {
-        console.log("ML Kit error", mlErr);
-      }
+  setTimeout(() => {
+    if (!dictPopup.classList.contains("bottom-mode")) {
+      let newTop = rect.top + window.scrollY - dictPopup.offsetHeight - 14;
+      if (newTop > window.scrollY + 10) dictPopup.style.top = newTop + "px";
     }
-
-    if (!translationStr) {
-      const res = await fetch(
-        `https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(text)}`,
-      );
-      if (!res.ok) throw new Error("API Limit");
-      const data = await res.json();
-      translationStr = data[0].map((item) => item[0]).join("");
-    }
-
-    dictTranslation.textContent = translationStr;
-    translationCache.set(cacheKey, translationStr);
-
-    if (!dictPopup.classList.contains("arrow-top")) {
-      dictPopup.style.top = `${rect.top + window.scrollY - dictPopup.offsetHeight - 14}px`;
-    }
-  } catch (err) {
-    dictTranslation.textContent = "一時的な制陁E(Trop de requêtes)";
-  }
+  }, 50);
 }
 
 // Téléchargement des modèles ML Kit en arrière-plan à l'ouverture d'un article
@@ -1165,8 +1231,15 @@ if (dictSaveBtn) {
 
           if (!exists) {
             savedWords.push({
-              fr: currentDictText,
-              ja: translationText,
+              fr: currentDictData ? currentDictData.mot : currentDictText,
+              ja: currentDictData
+                ? currentDictData.traductionPhrase
+                : translationText,
+              nature: currentDictData ? currentDictData.nature : "",
+              phraseOriginale: currentDictData
+                ? currentDictData.phraseOriginale
+                : "",
+              definitions: currentDictData ? currentDictData.definitions : [],
               listId: selectedListId,
               date: new Date().toISOString(),
             });
@@ -1275,63 +1348,112 @@ function renderSavedWords(listId) {
     container.innerHTML = `
             <div style="text-align:center; padding: 40px 20px; color: var(--text-muted);">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.5; margin-bottom:16px;"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-                <p>Cette liste est vide.<br>Sélectionnez un mot dans un article pour l'ajouter !</p>
+                <p>このリストは空です。<br>記事内で単語を選択して追加してください！</p>
             </div>`;
     return;
   }
 
-  // Afficher du plus récent au plus ancien
   const reversedWords = [...wordsInList].reverse();
 
   reversedWords.forEach((word) => {
     const card = document.createElement("div");
     card.className = "quiz-card fade-in";
     card.style.display = "flex";
-    card.style.justifyContent = "space-between";
-    card.style.alignItems = "center";
+    card.style.flexDirection = "column";
+    card.style.gap = "12px";
 
-    // Trouver le vrai index dans le tableau global pour la suppression
     const realIndex = savedWords.findIndex(
       (w) => w.fr === word.fr && w.listId === word.listId,
     );
 
-    card.innerHTML = `
-            <div>
-                <h3 style="color:var(--primary); margin-bottom:4px; font-size:1.2rem;">${word.fr}</h3>
-                <p style="font-weight:600; color:var(--text-main); font-size: 1rem;">${word.ja}</p>
-            </div>
-            <div style="display:flex; gap:8px;">
-                <button class="btn-play-word" data-word="${word.fr.replace(/"/g, "&quot;")}" style="background:var(--bg); border:1px solid var(--border); color:var(--green); border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-                </button>
-                <button class="btn-delete-word" data-index="${realIndex}" style="background:var(--bg); border:1px solid var(--border); color:var(--red); border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                </button>
-            </div>
+    // Header (Word + POS + Buttons)
+    const header = document.createElement("div");
+    header.style.display = "flex";
+    header.style.justifyContent = "space-between";
+    header.style.alignItems = "flex-start";
+
+    let natureHtml = word.nature
+      ? `<span style="background: var(--primary-light); color: var(--primary); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-bottom: 4px; display: inline-block;">${word.nature}</span>`
+      : "";
+
+    header.innerHTML = `
+      <div>
+          ${natureHtml}
+          <h3 style="color:var(--primary); margin:0; font-size:1.2rem;">${word.fr}</h3>
+      </div>
+      <div style="display:flex; gap:8px;">
+          <button class="btn-play-word" data-word="${word.fr.replace(/"/g, "&quot;")}" style="background:var(--bg); border:1px solid var(--border); color:var(--green); border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+          </button>
+          <button class="btn-delete-word" data-index="${realIndex}" style="background:var(--bg); border:1px solid var(--border); color:var(--red); border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
+      </div>
+    `;
+
+    // Body (Context Translation)
+    const body = document.createElement("div");
+
+    let contextHtml = "";
+    if (word.phraseOriginale && word.traductionPhrase) {
+      contextHtml = `
+        <div style="background: var(--surface-light); padding: 8px; border-radius: 8px; border-left: 3px solid var(--primary); margin-bottom: 8px;">
+            <div style="font-size: 0.85rem; color: var(--text-main); font-style: italic; margin-bottom: 4px;">"${word.phraseOriginale}"</div>
+            <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">${word.traductionPhrase}</div>
+        </div>
         `;
+    } else {
+      contextHtml = `<p style="font-weight:600; color:var(--text-main); font-size: 1rem; margin:0;">${word.ja}</p>`;
+    }
+
+    // Definitions Accordion
+    let defsHtml = "";
+    if (word.definitions && word.definitions.length > 0) {
+      defsHtml = `
+        <details style="margin-top: 4px; cursor: pointer;">
+            <summary style="font-size: 0.85rem; color: var(--text-muted); outline: none;">辞書を見る (Voir dictionnaire)</summary>
+            <ul style="margin: 8px 0 0 0; padding-left: 16px; font-size: 0.9rem; color: var(--text-main);">
+                ${word.definitions.map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("")}
+            </ul>
+        </details>
+        `;
+    }
+
+    body.innerHTML = contextHtml + defsHtml;
+
+    card.appendChild(header);
+    card.appendChild(body);
     container.appendChild(card);
   });
 
-  // Événements lecture audio
-  document.querySelectorAll(".btn-play-word").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const textToRead = e.currentTarget.getAttribute("data-word");
-      const utterance = new SpeechSynthesisUtterance(textToRead);
-      utterance.lang = "fr-FR";
-      if (preferredVoice) utterance.voice = preferredVoice;
-      if (window.speechSynthesis && window.speechSynthesis.speak)
-        window.speechSynthesis.speak(utterance);
+  // Attach event listeners for delete and play
+  const deleteBtns = container.querySelectorAll(".btn-delete-word");
+  deleteBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.getAttribute("data-index"));
+      if (confirm("この単語を削除しますか？")) {
+        savedWords.splice(idx, 1);
+        localStorage.setItem("furago_words", JSON.stringify(savedWords));
+        renderSavedWords(listId);
+      }
     });
   });
 
-  // Événements suppression
-  document.querySelectorAll(".btn-delete-word").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const idx = parseInt(e.currentTarget.getAttribute("data-index"));
-      savedWords.splice(idx, 1);
-      localStorage.setItem("furago_words", JSON.stringify(savedWords));
-      renderSavedWords(listId); // Rafraîchir la liste
-      renderListsOverview(); // Mettre à jour le compteur global
+  const playBtns = container.querySelectorAll(".btn-play-word");
+  playBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const text = btn.getAttribute("data-word");
+      if (text) {
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "fr-FR";
+        u.rate = 0.9;
+        const voices = speechSynthesis.getVoices();
+        const localVoices = voices.filter(
+          (v) => v.lang.startsWith("fr") && v.localService,
+        );
+        if (localVoices.length > 0) u.voice = localVoices[0];
+        speechSynthesis.speak(u);
+      }
     });
   });
 }
