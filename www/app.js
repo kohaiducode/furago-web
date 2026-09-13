@@ -156,7 +156,8 @@ async function initApp() {
       if (a.category) categories.add(a.category.trim());
     });
 
-    // Categories are populated dynamically when modal opens
+    selectedCategories = Array.from(categories);
+    globalCategoryBtn.textContent = "カテゴリー";
 
     renderHome();
   } catch (error) {
