@@ -1,5 +1,10 @@
 {
   "appId": "com.furago.app",
   "appName": "Furago",
-  "webDir": "www"
+  "webDir": "www",
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
 }

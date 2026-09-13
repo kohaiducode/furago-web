@@ -17,6 +17,254 @@ function showToast(message) {
 // -----------------------------------------------------
 // 0. DICTIONARY SERVICE (OFFLINE) & FRENCH LEMMATIZER
 // -----------------------------------------------------
+const PRIORITY_LEMMAS = {
+  // être (garantit que 'est' ne soit jamais traduit par 'Est/東' ni 'sommes' par un somme)
+  est: { lemma: "être", def: "〜である、いる、ある", pos: "動詞" },
+  suis: { lemma: "être", def: "〜である、いる、ある", pos: "動詞" },
+  sommes: { lemma: "être", def: "〜である、いる、ある", pos: "動詞" },
+  sont: { lemma: "être", def: "〜である、いる、ある", pos: "動詞" },
+  étais: { lemma: "être", def: "〜であった、いた、あった", pos: "動詞" },
+  était: { lemma: "être", def: "〜であった、いた、あった", pos: "動詞" },
+  étions: { lemma: "être", def: "〜であった、いた、あった", pos: "動詞" },
+  étiez: { lemma: "être", def: "〜であった、いた、あった", pos: "動詞" },
+  étaient: { lemma: "être", def: "〜であった、いた、あった", pos: "動詞" },
+  été: { lemma: "être", def: "〜であった、夏", pos: "動詞" },
+  serai: { lemma: "être", def: "〜になる、いるだろう", pos: "動詞" },
+  seras: { lemma: "être", def: "〜になる、いるだろう", pos: "動詞" },
+  sera: { lemma: "être", def: "〜になる、いるだろう", pos: "動詞" },
+  serons: { lemma: "être", def: "〜になる、いるだろう", pos: "動詞" },
+  serez: { lemma: "être", def: "〜になる、いるだろう", pos: "動詞" },
+  seront: { lemma: "être", def: "〜になる、いるだろう", pos: "動詞" },
+  serait: { lemma: "être", def: "〜であるだろう、いるだろう", pos: "動詞" },
+  seraient: { lemma: "être", def: "〜であるだろう、いるだろう", pos: "動詞" },
+  sois: { lemma: "être", def: "〜であれ、いる", pos: "動詞" },
+  soit: { lemma: "être", def: "〜であれ、または", pos: "動詞" },
+  soient: { lemma: "être", def: "〜であれ", pos: "動詞" },
+
+  // avoir (garantit que 'a' et 'ont' ne soient pas ignorés)
+  a: { lemma: "avoir", def: "持つ、ある、〜がいる", pos: "動詞" },
+  ont: { lemma: "avoir", def: "持つ、ある、〜がいる", pos: "動詞" },
+  ai: { lemma: "avoir", def: "持つ、ある、〜がいる", pos: "動詞" },
+  as: { lemma: "avoir", def: "持つ、ある、〜がいる", pos: "動詞" },
+  avons: { lemma: "avoir", def: "持つ、ある、〜がいる", pos: "動詞" },
+  avez: { lemma: "avoir", def: "持つ、ある、〜がいる", pos: "動詞" },
+  avait: { lemma: "avoir", def: "持っていた、あった、いた", pos: "動詞" },
+  avaient: { lemma: "avoir", def: "持っていた、あった、いた", pos: "動詞" },
+  aura: { lemma: "avoir", def: "持つだろう、あるだろう", pos: "動詞" },
+  auront: { lemma: "avoir", def: "持つだろう、あるだろう", pos: "動詞" },
+  aurait: { lemma: "avoir", def: "持つだろう、あるだろう", pos: "動詞" },
+  eu: { lemma: "avoir", def: "持った、あった", pos: "動詞" },
+
+  // aller
+  va: { lemma: "aller", def: "行く", pos: "動詞" },
+  vas: { lemma: "aller", def: "行く", pos: "動詞" },
+  vais: { lemma: "aller", def: "行く", pos: "動詞" },
+  allons: { lemma: "aller", def: "行く", pos: "動詞" },
+  allez: { lemma: "aller", def: "行く", pos: "動詞" },
+  vont: { lemma: "aller", def: "行く", pos: "動詞" },
+  allait: { lemma: "aller", def: "行った、行っていた", pos: "動詞" },
+  ira: { lemma: "aller", def: "行くだろう", pos: "動詞" },
+  iront: { lemma: "aller", def: "行くだろう", pos: "動詞" },
+  allé: { lemma: "aller", def: "行った", pos: "動詞" },
+
+  // faire
+  fait: { lemma: "faire", def: "する、作る、行う", pos: "動詞" },
+  font: { lemma: "faire", def: "する、作る、行う", pos: "動詞" },
+  fais: { lemma: "faire", def: "する、作る、行う", pos: "動詞" },
+  faisons: { lemma: "faire", def: "する、作る、行う", pos: "動詞" },
+  faites: { lemma: "faire", def: "する、作る、行う", pos: "動詞" },
+  faisait: { lemma: "faire", def: "していた、作った", pos: "動詞" },
+  fera: { lemma: "faire", def: "するだろう、作るだろう", pos: "動詞" },
+
+  // bon / bonne (garantit que 'bonne' soit reconnu comme l'adjectif bon et non une servante)
+  bonne: { lemma: "bon", def: "良い、美味しい、優れた", pos: "形容詞" },
+  bonnes: { lemma: "bon", def: "良い、美味しい、優れた", pos: "形容詞" },
+  bon: { lemma: "bon", def: "良い、美味しい、優れた", pos: "形容詞" },
+  bons: { lemma: "bon", def: "良い、美味しい、優れた", pos: "形容詞" },
+
+  // connaître (garantit que toutes les formes conjuguées soient trouvées)
+  connaît: {
+    lemma: "connaître",
+    def: "知る、理解する、知り合いである",
+    pos: "動詞",
+  },
+  connait: {
+    lemma: "connaître",
+    def: "知る、理解する、知り合いである",
+    pos: "動詞",
+  },
+  connais: {
+    lemma: "connaître",
+    def: "知る、理解する、知り合いである",
+    pos: "動詞",
+  },
+  connaissons: {
+    lemma: "connaître",
+    def: "知る、理解する、知り合いである",
+    pos: "動詞",
+  },
+  connaissez: {
+    lemma: "connaître",
+    def: "知る、理解する、知り合いである",
+    pos: "動詞",
+  },
+  connaissent: {
+    lemma: "connaître",
+    def: "知る、理解する、知り合いである",
+    pos: "動詞",
+  },
+  connaissait: { lemma: "connaître", def: "知っていた", pos: "動詞" },
+  connaissaient: { lemma: "connaître", def: "知っていた", pos: "動詞" },
+  connu: { lemma: "connaître", def: "知られている、有名な", pos: "動詞" },
+  connue: { lemma: "connaître", def: "知られている、有名な", pos: "動詞" },
+  connus: { lemma: "connaître", def: "知られている、有名な", pos: "動詞" },
+  connues: { lemma: "connaître", def: "知られている、有名な", pos: "動詞" },
+
+  // beau / belle
+  belle: { lemma: "beau", def: "美しい、素晴らしい、きれいな", pos: "形容詞" },
+  belles: { lemma: "beau", def: "美しい、素晴らしい、きれいな", pos: "形容詞" },
+  beaux: { lemma: "beau", def: "美しい、素晴らしい、きれいな", pos: "形容詞" },
+  bel: { lemma: "beau", def: "美しい、素晴らしい、きれいな", pos: "形容詞" },
+  beau: { lemma: "beau", def: "美しい、素晴らしい、きれいな", pos: "形容詞" },
+
+  // nouveau / nouvelle
+  nouvelle: { lemma: "nouveau", def: "新しい、新たな", pos: "形容詞" },
+  nouvelles: { lemma: "nouveau", def: "新しい、新たな", pos: "形容詞" },
+  nouveaux: { lemma: "nouveau", def: "新しい、新たな", pos: "形容詞" },
+  nouvel: { lemma: "nouveau", def: "新しい、新たな", pos: "形容詞" },
+
+  // grand / grande
+  grande: { lemma: "grand", def: "大きい、偉大な、高い", pos: "形容詞" },
+  grandes: { lemma: "grand", def: "大きい、偉大な、高い", pos: "形容詞" },
+  grands: { lemma: "grand", def: "大きい、偉大な、高い", pos: "形容詞" },
+
+  // petit / petite
+  petite: { lemma: "petit", def: "小さい、幼い", pos: "形容詞" },
+  petites: { lemma: "petit", def: "小さい、幼い", pos: "形容詞" },
+  petits: { lemma: "petit", def: "小さい、幼い", pos: "形容詞" },
+
+  // premier / première
+  première: { lemma: "premier", def: "最初の、第1の、主要な", pos: "形容詞" },
+  premières: { lemma: "premier", def: "最初の、第1の、主要な", pos: "形容詞" },
+  premiers: { lemma: "premier", def: "最初の、第1の、主要な", pos: "形容詞" },
+
+  // dernier / dernière
+  dernière: { lemma: "dernier", def: "最後の、最新の", pos: "形容詞" },
+  dernières: { lemma: "dernier", def: "最後の、最新の", pos: "形容詞" },
+  derniers: { lemma: "dernier", def: "最後の、最新の", pos: "形容詞" },
+
+  // vrai / vraie
+  vraie: { lemma: "vrai", def: "本当の、真実の、本物の", pos: "形容詞" },
+  vraies: { lemma: "vrai", def: "本当の、真実の、本物の", pos: "形容詞" },
+  vrais: { lemma: "vrai", def: "本当の、真実の、本物の", pos: "形容詞" },
+
+  // long / longue
+  longue: { lemma: "long", def: "長い", pos: "形容詞" },
+  longues: { lemma: "long", def: "長い", pos: "形容詞" },
+  longs: { lemma: "long", def: "長い", pos: "形容詞" },
+
+  // blanc / blanche
+  blanche: { lemma: "blanc", def: "白い", pos: "形容詞" },
+  blanches: { lemma: "blanc", def: "白い", pos: "形容詞" },
+
+  // pouvoir
+  peux: { lemma: "pouvoir", def: "〜できる", pos: "動詞" },
+  peut: { lemma: "pouvoir", def: "〜できる", pos: "動詞" },
+  peuvent: { lemma: "pouvoir", def: "〜できる", pos: "動詞" },
+  pouvons: { lemma: "pouvoir", def: "〜できる", pos: "動詞" },
+  pouvez: { lemma: "pouvoir", def: "〜できる", pos: "動詞" },
+  pouvait: { lemma: "pouvoir", def: "〜できた", pos: "動詞" },
+  pourra: { lemma: "pouvoir", def: "〜できるだろう", pos: "動詞" },
+  pourrait: { lemma: "pouvoir", def: "〜できるかもしれない", pos: "動詞" },
+  pu: { lemma: "pouvoir", def: "〜できた", pos: "動詞" },
+
+  // vouloir
+  veux: { lemma: "vouloir", def: "〜したい、望む", pos: "動詞" },
+  veut: { lemma: "vouloir", def: "〜したい、望む", pos: "動詞" },
+  veulent: { lemma: "vouloir", def: "〜したい、望む", pos: "動詞" },
+  voulons: { lemma: "vouloir", def: "〜したい、望む", pos: "動詞" },
+  voulez: { lemma: "vouloir", def: "〜したい、望む", pos: "動詞" },
+  voulait: { lemma: "vouloir", def: "〜したかった", pos: "動詞" },
+  voudra: { lemma: "vouloir", def: "〜したがるだろう", pos: "動詞" },
+  voudrait: { lemma: "vouloir", def: "〜したいのですが", pos: "動詞" },
+  voulu: { lemma: "vouloir", def: "望んだ", pos: "動詞" },
+
+  // devoir
+  dois: { lemma: "devoir", def: "〜しなければならない", pos: "動詞" },
+  doit: { lemma: "devoir", def: "〜しなければならない", pos: "動詞" },
+  doivent: { lemma: "devoir", def: "〜しなければならない", pos: "動詞" },
+  devons: { lemma: "devoir", def: "〜しなければならない", pos: "動詞" },
+  devez: { lemma: "devoir", def: "〜しなければならない", pos: "動詞" },
+  devait: { lemma: "devoir", def: "〜すべきだった、はずだった", pos: "動詞" },
+  devra: { lemma: "devoir", def: "〜しなければならないだろう", pos: "動詞" },
+  devrait: { lemma: "devoir", def: "〜すべきである", pos: "動詞" },
+  dû: { lemma: "devoir", def: "〜しなければならなかった", pos: "動詞" },
+
+  // savoir
+  sais: { lemma: "savoir", def: "知っている、わかる、できる", pos: "動詞" },
+  sait: { lemma: "savoir", def: "知っている、わかる、できる", pos: "動詞" },
+  savent: { lemma: "savoir", def: "知っている、わかる、できる", pos: "動詞" },
+  savons: { lemma: "savoir", def: "知っている、わかる、できる", pos: "動詞" },
+  savez: { lemma: "savoir", def: "知っている、わかる、できる", pos: "動詞" },
+  savait: { lemma: "savoir", def: "知っていた", pos: "動詞" },
+  su: { lemma: "savoir", def: "知った", pos: "動詞" },
+
+  // voir
+  vois: { lemma: "voir", def: "見る、見える、会う", pos: "動詞" },
+  voit: { lemma: "voir", def: "見る、見える、会う", pos: "動詞" },
+  voient: { lemma: "voir", def: "見る、見える、会う", pos: "動詞" },
+  voyons: { lemma: "voir", def: "見る、見える、会う", pos: "動詞" },
+  voyez: { lemma: "voir", def: "見る、見える、会う", pos: "動詞" },
+  voyait: { lemma: "voir", def: "見ていた", pos: "動詞" },
+  verra: { lemma: "voir", def: "見るだろう", pos: "動詞" },
+  vu: { lemma: "voir", def: "見た", pos: "動詞" },
+
+  // prendre
+  prend: { lemma: "prendre", def: "取る、乗る、食べる", pos: "動詞" },
+  prends: { lemma: "prendre", def: "取る、乗る、食べる", pos: "動詞" },
+  prennent: { lemma: "prendre", def: "取る、乗る、食べる", pos: "動詞" },
+  prenons: { lemma: "prendre", def: "取る、乗る、食べる", pos: "動詞" },
+  prenez: { lemma: "prendre", def: "取る、乗る、食べる", pos: "動詞" },
+  prenait: { lemma: "prendre", def: "取っていた", pos: "動詞" },
+  pris: { lemma: "prendre", def: "取った", pos: "動詞" },
+
+  // mettre
+  met: { lemma: "mettre", def: "置く、身につける", pos: "動詞" },
+  mets: { lemma: "mettre", def: "置く、身につける", pos: "動詞" },
+  mettent: { lemma: "mettre", def: "置く、身につける", pos: "動詞" },
+  mettons: { lemma: "mettre", def: "置く、身につける", pos: "動詞" },
+  mettez: { lemma: "mettre", def: "置く、身につける", pos: "動詞" },
+  mis: { lemma: "mettre", def: "置いた", pos: "動詞" },
+
+  // dire
+  dit: { lemma: "dire", def: "言う、話す", pos: "動詞" },
+  dis: { lemma: "dire", def: "言う、話す", pos: "動詞" },
+  disent: { lemma: "dire", def: "言う、話す", pos: "動詞" },
+  disons: { lemma: "dire", def: "言う、話す", pos: "動詞" },
+  dites: { lemma: "dire", def: "言う、話す", pos: "動詞" },
+
+  // venir
+  vient: { lemma: "venir", def: "来る", pos: "動詞" },
+  viens: { lemma: "venir", def: "来る", pos: "動詞" },
+  viennent: { lemma: "venir", def: "来る", pos: "動詞" },
+  venons: { lemma: "venir", def: "来る", pos: "動詞" },
+  venez: { lemma: "venir", def: "来る", pos: "動詞" },
+  venait: { lemma: "venir", def: "来ていた", pos: "動詞" },
+  venu: { lemma: "venir", def: "来た", pos: "動詞" },
+
+  // comprendre
+  comprend: { lemma: "comprendre", def: "理解する、わかる", pos: "動詞" },
+  comprends: { lemma: "comprendre", def: "理解する、わかる", pos: "動詞" },
+  comprennent: { lemma: "comprendre", def: "理解する、わかる", pos: "動詞" },
+  compris: { lemma: "comprendre", def: "理解した", pos: "動詞" },
+
+  // apprendre
+  apprend: { lemma: "apprendre", def: "学ぶ、習う、知る", pos: "動詞" },
+  apprends: { lemma: "apprendre", def: "学ぶ、習う、知る", pos: "動詞" },
+  apprennent: { lemma: "apprendre", def: "学ぶ、習う、知る", pos: "動詞" },
+  appris: { lemma: "apprendre", def: "学んだ", pos: "動詞" },
+};
+
 const IRREGULAR_VERBS = {
   // être
   suis: "être",
@@ -716,15 +964,30 @@ const DictionaryService = {
     );
 
     let matchedWord = cleanWord;
+    let conciseDef = "";
+    let nature = "単語";
     let entries = null;
 
-    if (this.isLoaded && this.db) {
+    // 1. Priorité absolue aux formes grammaticales essentielles (homonymes fréquents: est -> être, bonne -> bon, etc.)
+    if (PRIORITY_LEMMAS[cleanWord]) {
+      const p = PRIORITY_LEMMAS[cleanWord];
+      matchedWord = p.lemma;
+      conciseDef = p.def;
+      nature = p.pos;
+    } else if (this.isLoaded && this.db) {
       if (this.db[cleanWord]) {
         entries = this.db[cleanWord];
         matchedWord = cleanWord;
       } else {
         const candidates = getLemmaCandidates(cleanWord);
         for (const cand of candidates) {
+          if (PRIORITY_LEMMAS[cand]) {
+            const p = PRIORITY_LEMMAS[cand];
+            matchedWord = p.lemma;
+            conciseDef = p.def;
+            nature = p.pos;
+            break;
+          }
           if (this.db[cand]) {
             entries = this.db[cand];
             matchedWord = cand;
@@ -734,12 +997,9 @@ const DictionaryService = {
       }
     }
 
-    // Concise Japanese Definition: 1 line, e.g. "絵画、図表"
-    let conciseDef = "";
-    let posTags = [];
-
-    if (entries && entries.length > 0) {
+    if (entries && entries.length > 0 && !conciseDef) {
       const jpWords = [];
+      const posTags = [];
       for (const entry of entries) {
         const term = (
           entry.k && entry.k.length > 0
@@ -755,10 +1015,10 @@ const DictionaryService = {
         if (entry.p) posTags.push(...entry.p);
       }
       conciseDef = jpWords.slice(0, 3).join("、");
+      const uniquePos = [...new Set(posTags)];
+      if (uniquePos.length > 0) nature = uniquePos[0];
+      else if (conciseDef) nature = "名詞";
     }
-
-    posTags = [...new Set(posTags)];
-    let nature = posTags.length > 0 ? posTags[0] : conciseDef ? "名詞" : "単語";
 
     // Complete, grammatically sound context sentence
     let targetSentence = getShortTargetedContext(surroundingSentence, word);
@@ -841,7 +1101,7 @@ const DictionaryService = {
       originalWord: word,
       matchedLemma: matchedWord !== cleanWord ? matchedWord : null,
       conciseDef: conciseDef,
-      phraseOriginale: shortContextSentence,
+      phraseOriginale: targetSentence,
       traductionPhrase: traductionPhrase,
       nature: nature,
       definitions: [conciseDef].filter(Boolean),
