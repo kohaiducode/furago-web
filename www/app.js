@@ -79,7 +79,7 @@ if (typeof window.SpeechSynthesisUtterance === "undefined") {
 let currentArticles = [];
 let categories = new Set();
 let globalLevel = "A1";
-let globalCategory = "ALL";
+let selectedCategories = [];
 let currentArticleData = null;
 
 // État Audio
@@ -323,7 +323,7 @@ function openFilterModal(type) {
   };
 
   if (type === "level") {
-    filterModalTitle.textContent = "レベルを選択 (Choisir un niveau)";
+    filterModalTitle.textContent = "レベルを選ぶ";
     filterOptionsContainer.classList.remove("filter-grid");
     const levels = ["A1", "A2", "B1", "B2", "C1"];
     levels.forEach((level) => {
@@ -344,24 +344,45 @@ function openFilterModal(type) {
       filterOptionsContainer.appendChild(btn);
     });
   } else if (type === "category") {
-    filterModalTitle.textContent = "カテゴリーを選択 (Choisir une catégorie)";
+    filterModalTitle.textContent = "カテゴリーを選ぶ";
     filterOptionsContainer.classList.add("filter-grid");
-    const cats = ["ALL", ...Array.from(categories)];
+
+    const cats = Array.from(categories);
     cats.forEach((cat) => {
       const btn = document.createElement("button");
       btn.className = "quiz-option";
       btn.style.textAlign = "center";
-      if (globalCategory === cat) {
-        btn.style.borderColor = "var(--primary)";
-        btn.style.background = "var(--primary-light)";
-      }
-      btn.textContent = cat === "ALL" ? "カテゴリー (すべて)" : cat;
+
+      const updateStyle = () => {
+        if (selectedCategories.includes(cat)) {
+          btn.style.borderColor = "var(--primary)";
+          btn.style.background = "var(--primary-light)";
+        } else {
+          btn.style.borderColor = "#E5E5EA";
+          btn.style.background = "var(--surface)";
+        }
+      };
+
+      updateStyle();
+      btn.textContent = cat;
+
       btn.onclick = () => {
-        globalCategory = cat;
-        globalCategoryBtn.textContent =
-          cat === "ALL" ? "カテゴリー (すべて)" : cat;
+        if (selectedCategories.includes(cat)) {
+          if (selectedCategories.length > 1) {
+            selectedCategories = selectedCategories.filter((c) => c !== cat);
+          }
+        } else {
+          selectedCategories.push(cat);
+        }
+        updateStyle();
+
+        if (selectedCategories.length === categories.size) {
+          globalCategoryBtn.textContent = "カテゴリー";
+        } else {
+          globalCategoryBtn.textContent = `カテゴリー (${selectedCategories.length})`;
+        }
+
         renderHome();
-        closeFilter();
       };
       filterOptionsContainer.appendChild(btn);
     });
@@ -381,8 +402,7 @@ function renderHome() {
   articleList.innerHTML = "";
 
   const filteredArticles = currentArticles.filter((article) => {
-    if (globalCategory !== "ALL" && article.category.trim() !== globalCategory)
-      return false;
+    if (!selectedCategories.includes(article.category.trim())) return false;
     if (!article.levels[globalLevel]) return false;
     return true;
   });
@@ -1059,12 +1079,18 @@ if (dictAudioBtn) {
 // -----------------------------------------------------
 const dictSaveBtn = document.getElementById("dict-save-btn");
 let wordLists = JSON.parse(localStorage.getItem("furago_lists")) || [
-  { id: "default", name: "デフォルト (Tous les mots)" },
+  { id: "default", name: "デフォルト" },
 ];
 if (!Array.isArray(wordLists) || wordLists.length === 0) {
-  wordLists = [{ id: "default", name: "デフォルト (Tous les mots)" }];
+  wordLists = [{ id: "default", name: "デフォルト" }];
   localStorage.setItem("furago_lists", JSON.stringify(wordLists));
 }
+wordLists.forEach((l) => {
+  if (l.id === "default" && l.name.includes("Tous les mots")) {
+    l.name = "デフォルト";
+  }
+});
+localStorage.setItem("furago_lists", JSON.stringify(wordLists));
 
 let savedWords = JSON.parse(localStorage.getItem("furago_words")) || [];
 if (!Array.isArray(savedWords)) savedWords = [];
@@ -1146,7 +1172,7 @@ if (dictSaveBtn) {
             localStorage.setItem("furago_words", JSON.stringify(savedWords));
 
             // Animation visuelle de succès (TOAST CLAIR)
-            showToast("保存しました ! (Sauvegardé)");
+            showToast("保存しました !");
 
             // Rafraîchir les listes en arrière-plan si on y est
             renderListsOverview();
