@@ -591,6 +591,106 @@ function getLemmaCandidates(word) {
   return [...new Set(candidates)];
 }
 
+function getShortTargetedContext(paragraphText, word) {
+  if (!paragraphText) return "";
+  const clean = paragraphText.replace(/\s+/g, " ").trim();
+  const sentences = clean.split(/(?<=[.!?\n])\s+/).filter(Boolean);
+
+  const cleanWord = (word || "").trim().toLowerCase();
+  let sentence =
+    sentences.find((s) => s.toLowerCase().includes(cleanWord)) ||
+    sentences[0] ||
+    clean;
+
+  const words = sentence.trim().split(/\s+/);
+  if (words.length > 14) {
+    const clauses = sentence
+      .split(/[,:;—–«»"()]\s*/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const targetClause = clauses.find((c) =>
+      c.toLowerCase().includes(cleanWord),
+    );
+    if (
+      targetClause &&
+      targetClause.split(/\s+/).length >= 3 &&
+      targetClause.split(/\s+/).length <= 12
+    ) {
+      sentence = targetClause;
+    } else {
+      const idx = words.findIndex((w) => w.toLowerCase().includes(cleanWord));
+      if (idx !== -1) {
+        const start = Math.max(0, idx - 4);
+        const end = Math.min(words.length, idx + 5);
+        sentence = words.slice(start, end).join(" ");
+      }
+    }
+  }
+  return sentence.trim();
+}
+
+function repositionPopup(rect) {
+  if (!rect || !dictPopup) return;
+
+  const popupWidth = dictPopup.offsetWidth || 200;
+  const popupHeight = dictPopup.offsetHeight || 75;
+  const scrollY = window.scrollY || window.pageYOffset || 0;
+  const scrollX = window.scrollX || window.pageXOffset || 0;
+  const winWidth = window.innerWidth || document.documentElement.clientWidth;
+  const winHeight = window.innerHeight || document.documentElement.clientHeight;
+
+  // 1. Horizontal: clamp so it never exits the screen on left or right
+  const paddingX = 12;
+  let leftPos = rect.left + scrollX + rect.width / 2;
+  const minLeft = scrollX + paddingX + popupWidth / 2;
+  const maxLeft = scrollX + winWidth - paddingX - popupWidth / 2;
+  if (leftPos < minLeft) leftPos = minLeft;
+  if (leftPos > maxLeft) leftPos = maxLeft;
+
+  // 2. Arrow offset: points at center of selected word
+  const wordCenterScreenX = rect.left + rect.width / 2;
+  const popupLeftScreenX = leftPos - scrollX - popupWidth / 2;
+  let arrowPercent =
+    ((wordCenterScreenX - popupLeftScreenX) / popupWidth) * 100;
+  arrowPercent = Math.max(12, Math.min(88, arrowPercent));
+  dictPopup.style.setProperty("--arrow-x", `${arrowPercent}%`);
+
+  // 3. Vertical: avoid top bar (55px) and bottom nav / audio panel (75px)
+  const topSafety = 55;
+  const bottomSafety = 75;
+  const spaceAbove = rect.top - topSafety;
+  const spaceBelow = winHeight - rect.bottom - bottomSafety;
+
+  let topPos = 0;
+  if (spaceAbove >= popupHeight + 8) {
+    // Place ABOVE
+    topPos = rect.top + scrollY - popupHeight - 8;
+    dictPopup.classList.remove("arrow-top");
+  } else if (spaceBelow >= popupHeight + 8) {
+    // Place BELOW
+    topPos = rect.bottom + scrollY + 8;
+    dictPopup.classList.add("arrow-top");
+  } else {
+    // Very tight screen: place where there is more room and clamp within viewport
+    if (spaceAbove >= spaceBelow) {
+      topPos = Math.max(
+        scrollY + topSafety + 5,
+        rect.top + scrollY - popupHeight - 8,
+      );
+      dictPopup.classList.remove("arrow-top");
+    } else {
+      topPos = Math.min(
+        scrollY + winHeight - bottomSafety - popupHeight - 5,
+        rect.bottom + scrollY + 8,
+      );
+      dictPopup.classList.add("arrow-top");
+    }
+  }
+
+  dictPopup.style.left = `${leftPos}px`;
+  dictPopup.style.top = `${topPos}px`;
+}
+
 const DictionaryService = {
   db: null,
   isLoaded: false,
@@ -639,30 +739,40 @@ const DictionaryService = {
       }
     }
 
-    let definitions = [];
+    // Concise Japanese Definition: 1 line, e.g. "絵画、図表"
+    let conciseDef = "";
     let posTags = [];
 
-    if (entries) {
-      entries.forEach((entry) => {
-        let jpWords = [...(entry.k || []), ...(entry.r || [])].filter((x) => x);
-        let jpTitle = jpWords.join(" / ");
-        let gloss = (entry.g || []).join(", ");
-        definitions.push(`【${jpTitle}】 ${gloss}`);
+    if (entries && entries.length > 0) {
+      const jpWords = [];
+      for (const entry of entries) {
+        const term = (
+          entry.k && entry.k.length > 0
+            ? entry.k[0]
+            : entry.r && entry.r.length > 0
+              ? entry.r[0]
+              : ""
+        ).trim();
+        const cleanTerm = term.replace(/[\(（].*?[\)）]/g, "").trim();
+        if (cleanTerm && !jpWords.includes(cleanTerm)) {
+          jpWords.push(cleanTerm);
+        }
         if (entry.p) posTags.push(...entry.p);
-      });
+      }
+      conciseDef = jpWords.slice(0, 3).join("、");
     }
 
     posTags = [...new Set(posTags)];
-    let nature =
-      posTags.length > 0
-        ? posTags.join(", ")
-        : definitions.length > 0
-          ? "名詞"
-          : "単語";
+    let nature = posTags.length > 0 ? posTags[0] : conciseDef ? "名詞" : "単語";
 
-    // ML Kit Offline Contextual Translation
+    // Targeted short context sentence (e.g. "Jocondeは絵画です。")
+    let shortContextSentence = getShortTargetedContext(
+      surroundingSentence,
+      word,
+    );
     let traductionPhrase = "";
-    if (surroundingSentence && surroundingSentence.trim().length > 0) {
+
+    if (shortContextSentence && shortContextSentence.length > 0) {
       try {
         if (
           window.Capacitor &&
@@ -670,29 +780,32 @@ const DictionaryService = {
           window.Capacitor.Plugins.Translation
         ) {
           const result = await window.Capacitor.Plugins.Translation.translate({
-            text: surroundingSentence,
+            text: shortContextSentence,
             sourceLanguage: "fr",
             targetLanguage: "ja",
           });
           if (result && result.text) {
-            traductionPhrase = result.text;
+            traductionPhrase = result.text.trim();
           } else if (result && result.translatedText) {
-            traductionPhrase = result.translatedText;
+            traductionPhrase = result.translatedText.trim();
           }
         }
       } catch (e) {
         console.warn("ML Kit sentence translation error", e);
       }
 
-      // Online fallback if ML Kit is not ready or failed
+      // Online fallback if ML Kit is unavailable or failed
       if (!traductionPhrase) {
         try {
           const res = await fetch(
-            `https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(surroundingSentence)}`,
+            `https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(shortContextSentence)}`,
           );
           if (res.ok) {
             const data = await res.json();
-            traductionPhrase = data[0].map((item) => item[0]).join("");
+            traductionPhrase = data[0]
+              .map((item) => item[0])
+              .join("")
+              .trim();
           }
         } catch (netErr) {
           // offline
@@ -701,17 +814,18 @@ const DictionaryService = {
     }
 
     if (!traductionPhrase) {
-      traductionPhrase = "文脈の翻訳を取得できませんでした (オフライン)";
+      traductionPhrase = conciseDef ? conciseDef : "（文脈翻訳なし）";
     }
 
     return {
       mot: matchedWord,
       originalWord: word,
       matchedLemma: matchedWord !== cleanWord ? matchedWord : null,
-      phraseOriginale: surroundingSentence,
+      conciseDef: conciseDef,
+      phraseOriginale: shortContextSentence,
       traductionPhrase: traductionPhrase,
       nature: nature,
-      definitions: definitions,
+      definitions: [conciseDef].filter(Boolean),
     };
   },
 };
@@ -1692,72 +1806,63 @@ async function showDictionaryPopup(text, surroundingSentence, rect) {
 
   if (dictSaveBtn) {
     dictSaveBtn.style.color = "";
-    dictSaveBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+    dictSaveBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
   }
 
   dictWord.textContent = text;
+  const natureBadge = document.getElementById("dict-nature");
+  if (natureBadge) natureBadge.style.display = "none";
+
   dictTranslation.innerHTML =
-    '<div style="font-size:0.9rem; color:var(--text-muted); padding: 8px 0;">翻訳中...</div>';
+    '<div style="font-size:0.85rem; color:var(--text-muted); padding: 4px 0;">検索中...</div>';
 
   dictPopup.classList.remove("hidden");
-
-  let topPos = rect.top + window.scrollY - dictPopup.offsetHeight - 14;
-  let leftPos = rect.left + window.scrollX + rect.width / 2;
-
-  const minLeft = dictPopup.offsetWidth / 2 + 10;
-  const maxLeft = window.innerWidth - dictPopup.offsetWidth / 2 - 10;
-  if (leftPos < minLeft) leftPos = minLeft;
-  if (leftPos > maxLeft) leftPos = maxLeft;
-
-  if (topPos < window.scrollY + 10) {
-    topPos = rect.bottom + window.scrollY + 14;
-    dictPopup.classList.add("bottom-mode");
-  } else {
-    dictPopup.classList.remove("bottom-mode");
-  }
-
-  dictPopup.style.top = topPos + "px";
-  dictPopup.style.left = leftPos + "px";
+  repositionPopup(rect);
 
   const data = await DictionaryService.lookupWord(text, surroundingSentence);
   currentDictData = data;
   currentDictText = data.mot;
 
-  let lemmaNotice = data.matchedLemma
-    ? `<span style="font-size: 0.85rem; color: var(--text-muted); margin-left: 6px;">(原形: <strong>${data.mot}</strong>)</span>`
-    : "";
-
-  let html = `
-      <div style="margin-bottom: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
-        <span style="background: var(--primary-light); color: var(--primary); padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: bold;">${data.nature}</span>
-        <span style="font-weight: bold; font-size: 1.15rem; color: var(--text-main);">${data.originalWord}</span>
-        ${lemmaNotice}
-      </div>
-      <div style="background: var(--surface); padding: 10px 12px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid var(--primary); font-size: 0.95rem; color: var(--text-main);">
-        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; font-weight: bold;">文脈 (Contexte)</div>
-        <div>${data.traductionPhrase}</div>
-      </div>
-  `;
-
-  if (data.definitions.length > 0) {
-    html += `<div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; margin-top: 8px; font-weight: bold;">辞書 (Dictionnaire)</div>`;
-    html += `<ul style="margin: 0; padding-left: 18px; font-size: 0.9rem; color: var(--text-main); max-height: 160px; overflow-y: auto;">`;
-    data.definitions.forEach((d) => {
-      html += `<li style="margin-bottom: 4px;">${d}</li>`;
-    });
-    html += `</ul>`;
+  // Header: Word + (Lemma if different) + Nature tag
+  if (
+    data.matchedLemma &&
+    data.matchedLemma.toLowerCase() !== data.originalWord.toLowerCase()
+  ) {
+    dictWord.innerHTML = `${data.originalWord} <span class="dict-lemma-hint">(${data.mot})</span>`;
   } else {
-    html += `<div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic; margin-top: 8px;">辞書に見出し語が見つかりませんでした。文脈の翻訳をご参考ください。</div>`;
+    dictWord.textContent = data.originalWord;
+  }
+
+  if (natureBadge && data.nature) {
+    natureBadge.textContent = data.nature;
+    natureBadge.style.display = "inline-block";
+  } else if (natureBadge) {
+    natureBadge.style.display = "none";
+  }
+
+  // Translation Body:
+  // Line 1: Concise Japanese Definition (e.g. 絵画、図表)
+  // Line 2: Targeted context sentence (e.g. Jocondeは絵画です。)
+  let html = "";
+  if (data.conciseDef) {
+    html += `<div class="dict-def-line">${data.conciseDef}</div>`;
+  }
+
+  if (data.traductionPhrase) {
+    html += `
+      <div class="dict-context-row">
+        <span class="dict-context-label">文脈</span>
+        <span>${data.traductionPhrase}</span>
+      </div>
+    `;
+  } else if (!data.conciseDef) {
+    html = `<div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic;">定義が見つかりませんでした</div>`;
   }
 
   dictTranslation.innerHTML = html;
 
-  setTimeout(() => {
-    if (!dictPopup.classList.contains("bottom-mode")) {
-      let newTop = rect.top + window.scrollY - dictPopup.offsetHeight - 14;
-      if (newTop > window.scrollY + 10) dictPopup.style.top = newTop + "px";
-    }
-  }, 50);
+  // Re-calculate position accurately with rendered dimensions
+  repositionPopup(rect);
 }
 
 function preloadMLKitModels() {
@@ -2047,34 +2152,20 @@ function renderSavedWords(listId) {
     // Body (Context Translation)
     const body = document.createElement("div");
 
+    let defText = word.conciseDef || word.ja || "";
+    let defHtml = `<div class="dict-def-line" style="margin-bottom: 6px;">${defText}</div>`;
+
     let contextHtml = "";
     if (word.phraseOriginale && word.traductionPhrase) {
       contextHtml = `
-        <div style="background: var(--surface-light); padding: 8px; border-radius: 8px; border-left: 3px solid var(--primary); margin-bottom: 8px;">
-            <div style="font-size: 0.85rem; color: var(--text-main); font-style: italic; margin-bottom: 4px;">"${word.phraseOriginale}"</div>
-            <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">${word.traductionPhrase}</div>
+        <div class="dict-context-row" style="margin-bottom: 6px;">
+          <span class="dict-context-label">文脈</span>
+          <span>${word.traductionPhrase}</span>
         </div>
-        `;
-    } else {
-      contextHtml = `<p style="font-weight:600; color:var(--text-main); font-size: 1rem; margin:0;">${word.ja}</p>`;
+      `;
     }
 
-    // Definitions Accordion
-    let defsHtml = "";
-    if (word.definitions && word.definitions.length > 0) {
-      defsHtml = `
-        <details style="margin-top: 4px; cursor: pointer;">
-            <summary style="font-size: 0.85rem; color: var(--text-muted); outline: none;">辞書を見る (Voir dictionnaire)</summary>
-            <ul style="margin: 8px 0 0 0; padding-left: 16px; font-size: 0.9rem; color: var(--text-main);">
-                ${word.definitions.map((d) => `<li style="margin-bottom:4px;">${d}</li>`).join("")}
-            </ul>
-        </details>
-        `;
-    }
-
-    body.innerHTML = contextHtml + defsHtml;
-
-    card.appendChild(header);
+    body.innerHTML = defHtml + contextHtml;
     card.appendChild(body);
     container.appendChild(card);
   });
