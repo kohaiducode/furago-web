@@ -415,6 +415,8 @@ body {
   font-size: 1.15rem;
   line-height: 1.7;
   color: #333333;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .article-content p {

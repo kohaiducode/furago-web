@@ -1,3 +1,19 @@
+function showToast(message) {
+  let toast = document.getElementById("furago-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "furago-toast";
+    toast.style.cssText =
+      "position:fixed; top: 100px; left:50%; transform:translateX(-50%); background: var(--green); color: white; padding: 12px 24px; border-radius: 24px; font-weight: bold; font-size: 1rem; z-index: 99999; opacity: 0; transition: opacity 0.3s; pointer-events: none; box-shadow: 0 10px 25px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px;";
+    document.body.appendChild(toast);
+  }
+  toast.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> ${message}`;
+  toast.style.opacity = "1";
+  setTimeout(() => {
+    toast.style.opacity = "0";
+  }, 2000);
+}
+
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
 
 // Polyfill pour éviter les crashs si speechSynthesis n'est pas supporté (ex: certains WebViews Android)
@@ -686,6 +702,28 @@ function playNextInQueue() {
   currentUtterance.lang = "fr-FR";
   currentUtterance.rate = parseFloat(audioSpeedSelect.value);
 
+  currentUtterance.onstart = () => {
+    // Surligne toute la phrase par défaut au début
+    if (currentArticleData)
+      renderArticleHTML(currentArticleData.content, item.start, item.length);
+  };
+
+  currentUtterance.onboundary = (e) => {
+    // Surligne mot par mot pendant la lecture (si supporté par le téléphone)
+    if (e.name === "word") {
+      const textRemaining = item.text.substring(e.charIndex);
+      const match = textRemaining.match(/^[a-zA-ZÀ-ÿœŒæÆ]+/);
+      const wordLength = match ? match[0].length : 1;
+      if (currentArticleData) {
+        renderArticleHTML(
+          currentArticleData.content,
+          item.start + e.charIndex,
+          wordLength,
+        );
+      }
+    }
+  };
+
   currentUtterance.onend = () => {
     if (isPlaying && !isPaused) {
       currentQueueIndex++;
@@ -1095,13 +1133,8 @@ if (dictSaveBtn) {
             });
             localStorage.setItem("furago_words", JSON.stringify(savedWords));
 
-            // Animation visuelle de succès avec un check vert
-            dictSaveBtn.style.color = "var(--green)";
-            dictSaveBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
-            setTimeout(() => {
-              dictSaveBtn.style.color = "";
-              dictSaveBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
-            }, 1500);
+            // Animation visuelle de succès (TOAST CLAIR)
+            showToast("保存しました ! (Sauvegardé)");
 
             // Rafraîchir les listes en arrière-plan si on y est
             renderListsOverview();
@@ -1110,6 +1143,9 @@ if (dictSaveBtn) {
           }
         });
 
+        btn.addEventListener("click", () => {
+          listSelectorModal.classList.add("hidden");
+        });
         listSelectorContainer.appendChild(btn);
       });
       listSelectorModal.classList.remove("hidden");
