@@ -1,7 +1,6 @@
 import os
 import gzip
 import urllib.request
-import xml.etree.ElementTree as ET
 import json
 import re
 
@@ -10,20 +9,26 @@ JMDICT_GZ_FILE = "JMdict.gz"
 JMDICT_XML_FILE = "JMdict.xml"
 OUTPUT_JSON = "www/assets/dict.json"
 
-def download_file(url, filename):
-    print(f"Downloading {url}...")
-    urllib.request.urlretrieve(url, filename)
-    print("Download complete.")
-
-def extract_gz(gz_file, xml_file):
-    print(f"Extracting {gz_file} to {xml_file}...")
-    with gzip.open(gz_file, 'rb') as f_in:
-        with open(xml_file, 'wb') as f_out:
-            f_out.write(f_in.read())
-    print("Extraction complete.")
+def map_pos(p):
+    p = p.lower().strip()
+    if p.startswith('v') or p in ('vt', 'vi', 'vs', 'vk', 'vz', 'vr'):
+        return '動詞'
+    if p.startswith('adj'):
+        return '形容詞'
+    if p.startswith('adv'):
+        return '副詞'
+    if p in ('n', 'n-adv', 'n-t', 'n-pref', 'n-suf', 'pn', 'ctr'):
+        return '名詞'
+    if p == 'exp':
+        return '表現'
+    if p == 'int':
+        return '間投詞'
+    if p in ('conj', 'prt'):
+        return '接続詞'
+    return '名詞'
 
 def parse_jmdict(xml_file):
-    print("Parsing JMdict XML...")
+    print("Reading JMdict XML...")
     with open(xml_file, 'r', encoding='utf-8') as f:
         xml_content = f.read()
     
@@ -37,7 +42,6 @@ def parse_jmdict(xml_file):
     reb_pattern = re.compile(r'<reb>(.*?)</reb>')
     sense_pattern = re.compile(r'<sense>(.*?)</sense>', re.DOTALL)
     pos_pattern = re.compile(r'<pos>&(.*?);</pos>')
-    pos_pattern2 = re.compile(r'<pos>(.*?)</pos>')
     fre_gloss_pattern = re.compile(r'<gloss xml:lang="fre">(.*?)</gloss>')
     
     count = 0
@@ -45,19 +49,22 @@ def parse_jmdict(xml_file):
         entry_xml = match.group(1)
         kebs = keb_pattern.findall(entry_xml)
         rebs = reb_pattern.findall(entry_xml)
+        
+        # Extract POS at entry level
+        raw_pos_list = pos_pattern.findall(entry_xml)
+        mapped_pos = list(set([map_pos(p) for p in raw_pos_list]))
+        if not mapped_pos:
+            mapped_pos = ['名詞']
+
         senses = sense_pattern.findall(entry_xml)
         
         for sense in senses:
             fre_glosses = fre_gloss_pattern.findall(sense)
             if fre_glosses:
-                pos_list = pos_pattern.findall(sense)
-                if not pos_list:
-                    pos_list = pos_pattern2.findall(sense)
-                
                 entry_data = {
                     'k': kebs,
                     'r': rebs,
-                    'p': pos_list,
+                    'p': mapped_pos,
                     'g': fre_glosses
                 }
                 
@@ -66,7 +73,8 @@ def parse_jmdict(xml_file):
                     parts = re.split(r'[,;]', clean_gloss)
                     for part in parts:
                         part = part.strip()
-                        if not part: continue
+                        if not part or len(part) < 2: 
+                            continue
                         
                         if part not in dictionary:
                             dictionary[part] = []
@@ -75,18 +83,44 @@ def parse_jmdict(xml_file):
                             dictionary[part].append(entry_data)
                             
         count += 1
-        if count % 20000 == 0:
+        if count % 50000 == 0:
             print(f"Processed {count} entries...")
 
-    print(f"Dictionary built with {len(dictionary)} French keys.")
+    print(f"Base dictionary built with {len(dictionary)} French keys.")
+
+    # Add plural and feminine aliases to dictionary for nouns & adjectives
+    print("Generating common inflections (plurals & feminines)...")
+    inflections = {}
+    for word, entries in list(dictionary.items()):
+        # Only for single words
+        if ' ' not in word:
+            # Plural: -s
+            if not word.endswith('s') and not word.endswith('x') and len(word) > 2:
+                plural = word + 's'
+                if plural not in dictionary and plural not in inflections:
+                    inflections[plural] = entries
+            
+            # -al -> -aux (e.g. animal -> animaux, journal -> journaux)
+            if word.endswith('al') and len(word) > 3:
+                plural_aux = word[:-2] + 'aux'
+                if plural_aux not in dictionary and plural_aux not in inflections:
+                    inflections[plural_aux] = entries
+
+            # -eau -> -eaux (e.g. bateau -> bateaux)
+            if word.endswith('eau') and len(word) > 4:
+                plural_eaux = word + 'x'
+                if plural_eaux not in dictionary and plural_eaux not in inflections:
+                    inflections[plural_eaux] = entries
+
+    for k, v in inflections.items():
+        if k not in dictionary:
+            dictionary[k] = v
+
+    print(f"Total keys after inflections: {len(dictionary)}")
     return dictionary
 
 def main():
     os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
-    if not os.path.exists(JMDICT_XML_FILE):
-        if not os.path.exists(JMDICT_GZ_FILE):
-            download_file(JMDICT_URL, JMDICT_GZ_FILE)
-        extract_gz(JMDICT_GZ_FILE, JMDICT_XML_FILE)
     dictionary = parse_jmdict(JMDICT_XML_FILE)
     print("Saving to JSON...")
     with open(OUTPUT_JSON, 'w', encoding='utf-8') as f:

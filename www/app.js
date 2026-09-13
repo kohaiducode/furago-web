@@ -15,8 +15,582 @@ function showToast(message) {
 }
 
 // -----------------------------------------------------
-// 0. DICTIONARY SERVICE (OFFLINE)
+// 0. DICTIONARY SERVICE (OFFLINE) & FRENCH LEMMATIZER
 // -----------------------------------------------------
+const IRREGULAR_VERBS = {
+  // être
+  suis: "être",
+  es: "être",
+  est: "être",
+  sommes: "être",
+  êtes: "être",
+  sont: "être",
+  étais: "être",
+  était: "être",
+  étions: "être",
+  étiez: "être",
+  étaient: "être",
+  fus: "être",
+  fut: "être",
+  fûmes: "être",
+  fûtes: "être",
+  furent: "être",
+  serai: "être",
+  seras: "être",
+  sera: "être",
+  serons: "être",
+  serez: "être",
+  seront: "être",
+  serais: "être",
+  serait: "être",
+  serions: "être",
+  seriez: "être",
+  seraient: "être",
+  sois: "être",
+  soit: "être",
+  soyons: "être",
+  soyez: "être",
+  soient: "être",
+  été: "être",
+  // avoir
+  ai: "avoir",
+  as: "avoir",
+  a: "avoir",
+  avons: "avoir",
+  avez: "avoir",
+  ont: "avoir",
+  avais: "avoir",
+  avait: "avoir",
+  avions: "avoir",
+  aviez: "avoir",
+  avaient: "avoir",
+  eus: "avoir",
+  eut: "avoir",
+  eûmes: "avoir",
+  eûtes: "avoir",
+  eurent: "avoir",
+  aurai: "avoir",
+  auras: "avoir",
+  aura: "avoir",
+  aurons: "avoir",
+  aurez: "avoir",
+  auront: "avoir",
+  aurais: "avoir",
+  aurait: "avoir",
+  aurions: "avoir",
+  auriez: "avoir",
+  auraient: "avoir",
+  aie: "avoir",
+  aies: "avoir",
+  ait: "avoir",
+  ayons: "avoir",
+  ayez: "avoir",
+  aient: "avoir",
+  eu: "avoir",
+  eue: "avoir",
+  eus: "avoir",
+  eues: "avoir",
+  ayant: "avoir",
+  // aller
+  vais: "aller",
+  vas: "aller",
+  va: "aller",
+  allons: "aller",
+  allez: "aller",
+  vont: "aller",
+  allais: "aller",
+  allait: "aller",
+  allions: "aller",
+  alliez: "aller",
+  allaient: "aller",
+  irai: "aller",
+  iras: "aller",
+  ira: "aller",
+  irons: "aller",
+  irez: "aller",
+  iront: "aller",
+  irais: "aller",
+  irait: "aller",
+  irions: "aller",
+  iriez: "aller",
+  iraient: "aller",
+  aille: "aller",
+  ailles: "aller",
+  aillent: "aller",
+  allé: "aller",
+  allée: "aller",
+  allés: "aller",
+  allées: "aller",
+  allant: "aller",
+  // faire
+  fais: "faire",
+  fait: "faire",
+  faisons: "faire",
+  faites: "faire",
+  font: "faire",
+  faisais: "faire",
+  faisait: "faire",
+  faisions: "faire",
+  faisiez: "faire",
+  faisaient: "faire",
+  fis: "faire",
+  fit: "faire",
+  fîmes: "faire",
+  fîtes: "faire",
+  firent: "faire",
+  ferai: "faire",
+  feras: "faire",
+  fera: "faire",
+  ferons: "faire",
+  ferez: "faire",
+  feront: "faire",
+  ferais: "faire",
+  ferait: "faire",
+  ferions: "faire",
+  feriez: "faire",
+  feraient: "faire",
+  fasse: "faire",
+  fasses: "faire",
+  fassent: "faire",
+  faisant: "faire",
+  // pouvoir
+  peux: "pouvoir",
+  peut: "pouvoir",
+  pouvons: "pouvoir",
+  pouvez: "pouvoir",
+  peuvent: "pouvoir",
+  pouvais: "pouvoir",
+  pouvait: "pouvoir",
+  pouvions: "pouvoir",
+  pouviez: "pouvoir",
+  pouvaient: "pouvoir",
+  pus: "pouvoir",
+  put: "pouvoir",
+  pûmes: "pouvoir",
+  pûtes: "pouvoir",
+  purent: "pouvoir",
+  pourrai: "pouvoir",
+  pourras: "pouvoir",
+  pourra: "pouvoir",
+  pourrons: "pouvoir",
+  pourrez: "pouvoir",
+  pourront: "pouvoir",
+  pourrais: "pouvoir",
+  pourrait: "pouvoir",
+  pourrions: "pouvoir",
+  pourriez: "pouvoir",
+  pourraient: "pouvoir",
+  puisse: "pouvoir",
+  puisses: "pouvoir",
+  puissent: "pouvoir",
+  pu: "pouvoir",
+  pouvant: "pouvoir",
+  // vouloir
+  veux: "vouloir",
+  veut: "vouloir",
+  voulons: "vouloir",
+  voulez: "vouloir",
+  veulent: "vouloir",
+  voulais: "vouloir",
+  voulait: "vouloir",
+  voulions: "vouloir",
+  vouliez: "vouloir",
+  voulaient: "vouloir",
+  voulus: "vouloir",
+  voulut: "vouloir",
+  voulûmes: "vouloir",
+  voulûtes: "vouloir",
+  voulurent: "vouloir",
+  voudrai: "vouloir",
+  voudras: "vouloir",
+  voudra: "vouloir",
+  voudrons: "vouloir",
+  voudrez: "vouloir",
+  voudront: "vouloir",
+  voudrais: "vouloir",
+  voudrait: "vouloir",
+  voudrions: "vouloir",
+  voudriez: "vouloir",
+  voudraient: "vouloir",
+  veuille: "vouloir",
+  veuillent: "vouloir",
+  voulu: "vouloir",
+  voulue: "vouloir",
+  voulus: "vouloir",
+  voulues: "vouloir",
+  // devoir
+  dois: "devoir",
+  doit: "devoir",
+  devons: "devoir",
+  devez: "devoir",
+  doivent: "devoir",
+  devais: "devoir",
+  devait: "devoir",
+  devions: "devoir",
+  deviez: "devoir",
+  devaient: "devoir",
+  dus: "devoir",
+  dut: "devoir",
+  dûmes: "devoir",
+  dûtes: "devoir",
+  durent: "devoir",
+  devrai: "devoir",
+  devras: "devoir",
+  devra: "devoir",
+  devrons: "devoir",
+  devrez: "devoir",
+  devront: "devoir",
+  devrais: "devoir",
+  devrait: "devoir",
+  devrions: "devoir",
+  devriez: "devoir",
+  devraient: "devoir",
+  doive: "devoir",
+  doivent: "devoir",
+  dû: "devoir",
+  due: "devoir",
+  dus: "devoir",
+  dues: "devoir",
+  // savoir
+  sais: "savoir",
+  sait: "savoir",
+  savons: "savoir",
+  savez: "savoir",
+  savent: "savoir",
+  savais: "savoir",
+  savait: "savoir",
+  savions: "savoir",
+  saviez: "savoir",
+  savaient: "savoir",
+  sus: "savoir",
+  sut: "savoir",
+  sûmes: "savoir",
+  sûtes: "savoir",
+  surent: "savoir",
+  saurai: "savoir",
+  sauras: "savoir",
+  saura: "savoir",
+  saurons: "savoir",
+  saurez: "savoir",
+  sauront: "savoir",
+  saurais: "savoir",
+  saurait: "savoir",
+  saurions: "savoir",
+  sauriez: "savoir",
+  sauraient: "savoir",
+  sache: "savoir",
+  su: "savoir",
+  // voir
+  vois: "voir",
+  voit: "voir",
+  voyons: "voir",
+  voyez: "voir",
+  voient: "voir",
+  voyais: "voir",
+  voyait: "voir",
+  voyions: "voir",
+  voyiez: "voir",
+  voyaient: "voir",
+  vis: "voir",
+  vit: "voir",
+  vîmes: "voir",
+  vîtes: "voir",
+  virent: "voir",
+  verrai: "voir",
+  verras: "voir",
+  verra: "voir",
+  verrons: "voir",
+  verrez: "voir",
+  verront: "voir",
+  verrais: "voir",
+  verrait: "voir",
+  verraient: "voir",
+  vu: "voir",
+  vue: "voir",
+  vus: "voir",
+  // prendre
+  prends: "prendre",
+  prend: "prendre",
+  prenons: "prendre",
+  prenez: "prendre",
+  prennent: "prendre",
+  prenais: "prendre",
+  prenait: "prendre",
+  prenaient: "prendre",
+  pris: "prendre",
+  prise: "prendre",
+  prises: "prendre",
+  prendrai: "prendre",
+  prendras: "prendre",
+  prendra: "prendre",
+  prendront: "prendre",
+  prendrait: "prendre",
+  // venir
+  viens: "venir",
+  vient: "venir",
+  venons: "venir",
+  venez: "venir",
+  viennent: "venir",
+  venais: "venir",
+  venait: "venir",
+  venaient: "venir",
+  venu: "venir",
+  venue: "venir",
+  venus: "venir",
+  venues: "venir",
+  viendrai: "venir",
+  viendra: "venir",
+  viendront: "venir",
+  viendrait: "venir",
+  // dire
+  dis: "dire",
+  dit: "dire",
+  disons: "dire",
+  dites: "dire",
+  disent: "dire",
+  disais: "dire",
+  disait: "dire",
+  disaient: "dire",
+  dirai: "dire",
+  dira: "dire",
+  diront: "dire",
+  // mettre
+  mets: "mettre",
+  met: "mettre",
+  mettons: "mettre",
+  mettez: "mettre",
+  mettent: "mettre",
+  mettais: "mettre",
+  mettait: "mettre",
+  mettaient: "mettre",
+  mis: "mettre",
+  mise: "mettre",
+  mises: "mettre",
+  mettrai: "mettre",
+  mettra: "mettre",
+  mettront: "mettre",
+  mettrait: "mettre",
+  // divers
+  faut: "falloir",
+  fallait: "falloir",
+  faudra: "falloir",
+  faudrait: "falloir",
+  fallu: "falloir",
+  crois: "croire",
+  croit: "croire",
+  croyons: "croire",
+  croient: "croire",
+  croyait: "croire",
+  cru: "croire",
+  écris: "écrire",
+  écrit: "écrire",
+  écrivons: "écrire",
+  écrivent: "écrire",
+  écrivait: "écrire",
+  lis: "lire",
+  lit: "lire",
+  lisons: "lire",
+  lisent: "lire",
+  lisait: "lire",
+  lu: "lire",
+  ouvre: "ouvrir",
+  ouvres: "ouvrir",
+  ouvrent: "ouvrir",
+  ouvrait: "ouvrir",
+  ouvert: "ouvrir",
+  reçois: "recevoir",
+  reçoit: "recevoir",
+  recevons: "recevoir",
+  reçoivent: "recevoir",
+  recevait: "recevoir",
+  reçu: "recevoir",
+};
+
+function getLemmaCandidates(word) {
+  const candidates = [];
+  if (IRREGULAR_VERBS[word]) candidates.push(IRREGULAR_VERBS[word]);
+
+  const prefixes = [
+    "re",
+    "dé",
+    "com",
+    "sur",
+    "in",
+    "im",
+    "ap",
+    "sou",
+    "con",
+    "pre",
+    "par",
+    "inter",
+  ];
+  for (const p of prefixes) {
+    if (word.startsWith(p)) {
+      const sub = word.slice(p.length);
+      if (IRREGULAR_VERBS[sub]) {
+        candidates.push(p + IRREGULAR_VERBS[sub]);
+      }
+    }
+  }
+
+  // 1. Plural rules
+  if (word.endsWith("aux") && word.length > 4) {
+    candidates.push(word.slice(0, -3) + "al");
+    candidates.push(word.slice(0, -3) + "ail");
+  }
+  if (word.endsWith("eaux") && word.length > 4) {
+    candidates.push(word.slice(0, -1));
+  }
+  if (word.endsWith("s") && word.length > 2) {
+    candidates.push(word.slice(0, -1));
+  }
+  if (word.endsWith("x") && word.length > 3) {
+    candidates.push(word.slice(0, -1));
+  }
+
+  // 2. Feminine rules
+  if (word.endsWith("euses"))
+    candidates.push(word.slice(0, -5) + "eur", word.slice(0, -5) + "eux");
+  else if (word.endsWith("euse"))
+    candidates.push(word.slice(0, -4) + "eur", word.slice(0, -4) + "eux");
+
+  if (word.endsWith("trices")) candidates.push(word.slice(0, -6) + "teur");
+  else if (word.endsWith("trice")) candidates.push(word.slice(0, -5) + "teur");
+
+  if (word.endsWith("ières")) candidates.push(word.slice(0, -5) + "ier");
+  else if (word.endsWith("ière")) candidates.push(word.slice(0, -4) + "ier");
+
+  if (word.endsWith("iennes")) candidates.push(word.slice(0, -6) + "ien");
+  else if (word.endsWith("ienne")) candidates.push(word.slice(0, -5) + "ien");
+
+  if (word.endsWith("elles"))
+    candidates.push(word.slice(0, -5) + "el", word.slice(0, -5) + "eau");
+  else if (word.endsWith("elle"))
+    candidates.push(word.slice(0, -4) + "el", word.slice(0, -4) + "eau");
+
+  if (word.endsWith("ives")) candidates.push(word.slice(0, -4) + "if");
+  else if (word.endsWith("ive")) candidates.push(word.slice(0, -3) + "if");
+
+  if (word.endsWith("es") && word.length > 3) {
+    candidates.push(word.slice(0, -2));
+    candidates.push(word.slice(0, -1));
+  }
+  if (word.endsWith("e") && word.length > 3) {
+    candidates.push(word.slice(0, -1));
+  }
+
+  // 3. Verb conjugations (1st group -er)
+  const erEndings = [
+    "erait",
+    "eraient",
+    "erions",
+    "eriez",
+    "erons",
+    "erez",
+    "eront",
+    "erais",
+    "assent",
+    "asses",
+    "âmes",
+    "âtes",
+    "èrent",
+    "aient",
+    "ions",
+    "iez",
+    "eras",
+    "erai",
+    "era",
+    "ais",
+    "ait",
+    "ant",
+    "ons",
+    "ez",
+    "ent",
+    "ée",
+    "és",
+    "ées",
+    "é",
+    "e",
+    "es",
+  ];
+  for (const end of erEndings) {
+    if (word.endsWith(end) && word.length > end.length + 2) {
+      const stem = word.slice(0, -end.length);
+      candidates.push(stem + "er");
+      if (stem.endsWith("e")) candidates.push(stem.slice(0, -1) + "er");
+      if (stem.endsWith("ç")) candidates.push(stem.slice(0, -1) + "cer");
+      if (stem.length > 3 && stem[stem.length - 1] === stem[stem.length - 2]) {
+        candidates.push(stem.slice(0, -1) + "er");
+      }
+      if (stem.includes("è")) {
+        candidates.push(stem.replace(/è/g, "e") + "er");
+        candidates.push(stem.replace(/è/g, "é") + "er");
+      }
+    }
+  }
+
+  // 4. Verb conjugations (2nd & 3rd group -ir / -re)
+  const irEndings = [
+    "issaient",
+    "issions",
+    "issiez",
+    "issent",
+    "issait",
+    "issant",
+    "issons",
+    "issez",
+    "irait",
+    "iraient",
+    "irions",
+    "iriez",
+    "irons",
+    "irez",
+    "iront",
+    "irais",
+    "ira",
+    "irai",
+    "iras",
+    "it",
+    "is",
+    "i",
+    "ie",
+    "ies",
+  ];
+  for (const end of irEndings) {
+    if (word.endsWith(end) && word.length > end.length + 2) {
+      const stem = word.slice(0, -end.length);
+      candidates.push(stem + "ir");
+    }
+  }
+
+  const dreEndings = [
+    "dent",
+    "dait",
+    "daient",
+    "dons",
+    "dez",
+    "dra",
+    "drait",
+    "dront",
+    "du",
+    "due",
+    "dus",
+    "dues",
+  ];
+  for (const end of dreEndings) {
+    if (word.endsWith(end) && word.length > end.length + 2) {
+      candidates.push(word.slice(0, -end.length) + "dre");
+    }
+  }
+
+  if (word.endsWith("ent") && word.length > 5) {
+    const s = word.slice(0, -3);
+    candidates.push(s + "ir", s + "re", s + "tre");
+  }
+
+  return [...new Set(candidates)];
+}
+
 const DictionaryService = {
   db: null,
   isLoaded: false,
@@ -27,7 +601,10 @@ const DictionaryService = {
       const res = await fetch("assets/dict.json");
       this.db = await res.json();
       this.isLoaded = true;
-      console.log("Offline dictionary loaded successfully.");
+      console.log(
+        "Offline dictionary loaded successfully. Total keys:",
+        Object.keys(this.db).length,
+      );
     } catch (e) {
       console.error("Failed to load offline dictionary", e);
     }
@@ -36,15 +613,36 @@ const DictionaryService = {
   async lookupWord(word, surroundingSentence) {
     let cleanWord = word
       .toLowerCase()
-      .replace(/[.,!?:;"'()[\]]/g, "")
+      .replace(/[.,!?:;"'()[\]«»„“”]/g, "")
       .trim();
-    cleanWord = cleanWord.replace(/^(l'|d'|qu'|j'|m'|t'|s'|n'|c'|ç')/, "");
+    cleanWord = cleanWord.replace(
+      /^(l['’]|d['’]|qu['’]|j['’]|m['’]|t['’]|s['’]|n['’]|c['’]|ç['’])/,
+      "",
+    );
+
+    let matchedWord = cleanWord;
+    let entries = null;
+
+    if (this.isLoaded && this.db) {
+      if (this.db[cleanWord]) {
+        entries = this.db[cleanWord];
+        matchedWord = cleanWord;
+      } else {
+        const candidates = getLemmaCandidates(cleanWord);
+        for (const cand of candidates) {
+          if (this.db[cand]) {
+            entries = this.db[cand];
+            matchedWord = cand;
+            break;
+          }
+        }
+      }
+    }
 
     let definitions = [];
     let posTags = [];
 
-    if (this.isLoaded && this.db && this.db[cleanWord]) {
-      const entries = this.db[cleanWord];
+    if (entries) {
       entries.forEach((entry) => {
         let jpWords = [...(entry.k || []), ...(entry.r || [])].filter((x) => x);
         let jpTitle = jpWords.join(" / ");
@@ -55,28 +653,65 @@ const DictionaryService = {
     }
 
     posTags = [...new Set(posTags)];
-    let nature = posTags.length > 0 ? posTags.join(", ") : "inconnu";
+    let nature =
+      posTags.length > 0
+        ? posTags.join(", ")
+        : definitions.length > 0
+          ? "名詞"
+          : "単語";
 
-    let traductionPhrase = "翻訳中...";
-    try {
-      const result = await Capacitor.Plugins.Translation.translate({
-        text: surroundingSentence,
-        sourceLanguage: "fr",
-        targetLanguage: "ja",
-      });
-      traductionPhrase = result.translatedText;
-    } catch (e) {
-      console.error("ML Kit Error", e);
-      traductionPhrase = "文脈の翻訳エラー";
+    // ML Kit Offline Contextual Translation
+    let traductionPhrase = "";
+    if (surroundingSentence && surroundingSentence.trim().length > 0) {
+      try {
+        if (
+          window.Capacitor &&
+          window.Capacitor.Plugins &&
+          window.Capacitor.Plugins.Translation
+        ) {
+          const result = await window.Capacitor.Plugins.Translation.translate({
+            text: surroundingSentence,
+            sourceLanguage: "fr",
+            targetLanguage: "ja",
+          });
+          if (result && result.text) {
+            traductionPhrase = result.text;
+          } else if (result && result.translatedText) {
+            traductionPhrase = result.translatedText;
+          }
+        }
+      } catch (e) {
+        console.warn("ML Kit sentence translation error", e);
+      }
+
+      // Online fallback if ML Kit is not ready or failed
+      if (!traductionPhrase) {
+        try {
+          const res = await fetch(
+            `https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(surroundingSentence)}`,
+          );
+          if (res.ok) {
+            const data = await res.json();
+            traductionPhrase = data[0].map((item) => item[0]).join("");
+          }
+        } catch (netErr) {
+          // offline
+        }
+      }
+    }
+
+    if (!traductionPhrase) {
+      traductionPhrase = "文脈の翻訳を取得できませんでした (オフライン)";
     }
 
     return {
-      mot: cleanWord,
+      mot: matchedWord,
+      originalWord: word,
+      matchedLemma: matchedWord !== cleanWord ? matchedWord : null,
       phraseOriginale: surroundingSentence,
       traductionPhrase: traductionPhrase,
       nature: nature,
       definitions: definitions,
-      originalWord: word,
     };
   },
 };
@@ -1062,7 +1697,7 @@ async function showDictionaryPopup(text, surroundingSentence, rect) {
 
   dictWord.textContent = text;
   dictTranslation.innerHTML =
-    '<div style="font-size:0.9rem; color:var(--text-muted);">翻訳中...</div>';
+    '<div style="font-size:0.9rem; color:var(--text-muted); padding: 8px 0;">翻訳中...</div>';
 
   dictPopup.classList.remove("hidden");
 
@@ -1088,26 +1723,31 @@ async function showDictionaryPopup(text, surroundingSentence, rect) {
   currentDictData = data;
   currentDictText = data.mot;
 
+  let lemmaNotice = data.matchedLemma
+    ? `<span style="font-size: 0.85rem; color: var(--text-muted); margin-left: 6px;">(原形: <strong>${data.mot}</strong>)</span>`
+    : "";
+
   let html = `
-      <div style="margin-bottom: 8px;">
-        <span style="background: var(--primary-light); color: var(--primary); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-right: 8px;">${data.nature}</span>
-        <span style="font-weight: bold; font-size: 1.1rem;">${data.mot}</span>
+      <div style="margin-bottom: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+        <span style="background: var(--primary-light); color: var(--primary); padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: bold;">${data.nature}</span>
+        <span style="font-weight: bold; font-size: 1.15rem; color: var(--text-main);">${data.originalWord}</span>
+        ${lemmaNotice}
       </div>
-      <div style="background: var(--surface); padding: 8px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--primary); font-size: 0.95rem; color: var(--text-main);">
-        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">文脈 (Contexte)</div>
-        ${data.traductionPhrase}
+      <div style="background: var(--surface); padding: 10px 12px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid var(--primary); font-size: 0.95rem; color: var(--text-main);">
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; font-weight: bold;">文脈 (Contexte)</div>
+        <div>${data.traductionPhrase}</div>
       </div>
-    `;
+  `;
 
   if (data.definitions.length > 0) {
-    html += `<div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; margin-top: 12px; text-transform: uppercase;">辞書 (Dictionnaire)</div>`;
-    html += `<ul style="margin: 0; padding-left: 16px; font-size: 0.9rem; color: var(--text-main);">`;
+    html += `<div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; margin-top: 8px; font-weight: bold;">辞書 (Dictionnaire)</div>`;
+    html += `<ul style="margin: 0; padding-left: 18px; font-size: 0.9rem; color: var(--text-main); max-height: 160px; overflow-y: auto;">`;
     data.definitions.forEach((d) => {
       html += `<li style="margin-bottom: 4px;">${d}</li>`;
     });
     html += `</ul>`;
   } else {
-    html += `<div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic; margin-top: 12px;">辞書に定義が見つかりませんでした。</div>`;
+    html += `<div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic; margin-top: 8px;">辞書に見出し語が見つかりませんでした。文脈の翻訳をご参考ください。</div>`;
   }
 
   dictTranslation.innerHTML = html;
@@ -1120,7 +1760,6 @@ async function showDictionaryPopup(text, surroundingSentence, rect) {
   }, 50);
 }
 
-// Téléchargement des modèles ML Kit en arrière-plan à l'ouverture d'un article
 function preloadMLKitModels() {
   if (
     window.Capacitor &&
@@ -1243,6 +1882,9 @@ if (dictSaveBtn) {
           if (!exists) {
             savedWords.push({
               fr: currentDictData ? currentDictData.mot : currentDictText,
+              originalWord: currentDictData
+                ? currentDictData.originalWord
+                : currentDictText,
               ja: currentDictData
                 ? currentDictData.traductionPhrase
                 : translationText,
@@ -1390,7 +2032,7 @@ function renderSavedWords(listId) {
     header.innerHTML = `
       <div>
           ${natureHtml}
-          <h3 style="color:var(--primary); margin:0; font-size:1.2rem;">${word.fr}</h3>
+          <h3 style="color:var(--primary); margin:0; font-size:1.2rem;">${word.originalWord && word.originalWord.toLowerCase() !== word.fr.toLowerCase() ? `${word.originalWord} <span style="font-size:0.85rem; color:var(--text-muted); font-weight:normal;">(原形: ${word.fr})</span>` : word.fr}</h3>
       </div>
       <div style="display:flex; gap:8px;">
           <button class="btn-play-word" data-word="${word.fr.replace(/"/g, "&quot;")}" style="background:var(--bg); border:1px solid var(--border); color:var(--green); border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
