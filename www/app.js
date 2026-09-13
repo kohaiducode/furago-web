@@ -1020,19 +1020,29 @@ document.addEventListener("selectionchange", () => {
   const selection = window.getSelection();
   const text = selection.toString().trim();
 
-  // Si l'utilisateur a vraiment surligné du texte (ex: 2 mots)
   if (text && text.length > 0 && text.length <= 50) {
-    // Petit délai pour s'assurer que la sélection est finie
     setTimeout(() => {
-      const latestText = window.getSelection().toString().trim();
-      if (latestText === text) {
-        const range = window.getSelection().getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        showDictionaryPopup(latestText, rect);
+      const currentSelection = window.getSelection();
+      const latestText = currentSelection.toString().trim();
+      if (latestText === text && currentSelection.rangeCount > 0) {
+        let range = currentSelection.getRangeAt(0);
+        let rect = range.getBoundingClientRect();
+        
+        let container = range.commonAncestorContainer;
+        if (container.nodeType === 3) container = container.parentElement;
+        
+        // Find surrounding sentence
+        const paragraphText = container.textContent || "";
+        const sentences = paragraphText.split(/(?<=[.!?])\s+/);
+        let surroundingSentence = sentences.find(s => s.includes(latestText)) || paragraphText;
+        
+        showDictionaryPopup(latestText, surroundingSentence, rect);
       }
     }, 400);
+  } else if (!text || text.length === 0) {
+    dictPopup.classList.add("hidden");
   }
-});
+}););
 
 // Fonction commune pour afficher le popup et traduire
 let currentDictData = null;
