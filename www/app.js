@@ -14,6 +14,73 @@ function showToast(message) {
   }, 2000);
 }
 
+// -----------------------------------------------------
+// 0. DICTIONARY SERVICE (OFFLINE)
+// -----------------------------------------------------
+const DictionaryService = {
+  db: null,
+  isLoaded: false,
+
+  async init() {
+    try {
+      console.log("Loading offline dictionary...");
+      const res = await fetch("assets/dict.json");
+      this.db = await res.json();
+      this.isLoaded = true;
+      console.log("Offline dictionary loaded successfully.");
+    } catch (e) {
+      console.error("Failed to load offline dictionary", e);
+    }
+  },
+
+  async lookupWord(word, surroundingSentence) {
+    let cleanWord = word
+      .toLowerCase()
+      .replace(/[.,!?:;"'()[\]]/g, "")
+      .trim();
+    cleanWord = cleanWord.replace(/^(l'|d'|qu'|j'|m'|t'|s'|n'|c'|ç')/, "");
+
+    let definitions = [];
+    let posTags = [];
+
+    if (this.isLoaded && this.db && this.db[cleanWord]) {
+      const entries = this.db[cleanWord];
+      entries.forEach((entry) => {
+        let jpWords = [...(entry.k || []), ...(entry.r || [])].filter((x) => x);
+        let jpTitle = jpWords.join(" / ");
+        let gloss = (entry.g || []).join(", ");
+        definitions.push(`【${jpTitle}】 ${gloss}`);
+        if (entry.p) posTags.push(...entry.p);
+      });
+    }
+
+    posTags = [...new Set(posTags)];
+    let nature = posTags.length > 0 ? posTags.join(", ") : "inconnu";
+
+    let traductionPhrase = "翻訳中...";
+    try {
+      const result = await Capacitor.Plugins.Translation.translate({
+        text: surroundingSentence,
+        sourceLanguage: "fr",
+        targetLanguage: "ja",
+      });
+      traductionPhrase = result.translatedText;
+    } catch (e) {
+      console.error("ML Kit Error", e);
+      traductionPhrase = "文脈の翻訳エラー";
+    }
+
+    return {
+      mot: cleanWord,
+      phraseOriginale: surroundingSentence,
+      traductionPhrase: traductionPhrase,
+      nature: nature,
+      definitions: definitions,
+      originalWord: word,
+    };
+  },
+};
+
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
 
 // Polyfill pour éviter les crashs si speechSynthesis n'est pas supporté (ex: certains WebViews Android)
@@ -890,72 +957,7 @@ const dictAudioBtn = document.getElementById("dict-audio-btn");
 let currentDictText = "";
 const translationCache = new Map(); // Cache pour mémoriser les traductions
 
-// -----------------------------------------------------
-// 0. DICTIONARY SERVICE (OFFLINE)
-// -----------------------------------------------------
-const DictionaryService = {
-  db: null,
-  isLoaded: false,
 
-  async init() {
-    try {
-      console.log("Loading offline dictionary...");
-      const res = await fetch("assets/dict.json");
-      this.db = await res.json();
-      this.isLoaded = true;
-      console.log("Offline dictionary loaded successfully.");
-    } catch (e) {
-      console.error("Failed to load offline dictionary", e);
-    }
-  },
-
-  async lookupWord(word, surroundingSentence) {
-    let cleanWord = word
-      .toLowerCase()
-      .replace(/[.,!?:;"'()[\]]/g, "")
-      .trim();
-    cleanWord = cleanWord.replace(/^(l'|d'|qu'|j'|m'|t'|s'|n'|c'|ç')/, "");
-
-    let definitions = [];
-    let posTags = [];
-
-    if (this.isLoaded && this.db && this.db[cleanWord]) {
-      const entries = this.db[cleanWord];
-      entries.forEach((entry) => {
-        let jpWords = [...(entry.k || []), ...(entry.r || [])].filter((x) => x);
-        let jpTitle = jpWords.join(" / ");
-        let gloss = (entry.g || []).join(", ");
-        definitions.push(`【${jpTitle}】 ${gloss}`);
-        if (entry.p) posTags.push(...entry.p);
-      });
-    }
-
-    posTags = [...new Set(posTags)];
-    let nature = posTags.length > 0 ? posTags.join(", ") : "inconnu";
-
-    let traductionPhrase = "翻訳中...";
-    try {
-      const result = await Capacitor.Plugins.Translation.translate({
-        text: surroundingSentence,
-        sourceLanguage: "fr",
-        targetLanguage: "ja",
-      });
-      traductionPhrase = result.translatedText;
-    } catch (e) {
-      console.error("ML Kit Error", e);
-      traductionPhrase = "文脈の翻訳エラー";
-    }
-
-    return {
-      mot: cleanWord,
-      phraseOriginale: surroundingSentence,
-      traductionPhrase: traductionPhrase,
-      nature: nature,
-      definitions: definitions,
-      originalWord: word,
-    };
-  },
-};
 
 // --- GESTION DU CLIC / TAP SIMPLE SUR UN MOT ---
 let tapStartX = 0;
