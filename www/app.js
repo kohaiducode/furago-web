@@ -702,6 +702,10 @@ function playNextInQueue() {
   currentUtterance.lang = "fr-FR";
   currentUtterance.rate = parseFloat(audioSpeedSelect.value);
 
+  // Surlignage synchrone immédiat (au cas où onstart bug sur Android)
+  if (currentArticleData)
+    renderArticleHTML(currentArticleData.content, item.start, item.length);
+
   currentUtterance.onstart = () => {
     // Surligne toute la phrase par défaut au début
     if (currentArticleData)
@@ -865,17 +869,34 @@ let currentDictText = "";
 const translationCache = new Map(); // Cache pour mémoriser les traductions
 
 // --- GESTION DU CLIC / TAP SIMPLE SUR UN MOT ---
-document.addEventListener("click", (e) => {
+let tapStartX = 0;
+let tapStartY = 0;
+
+document.addEventListener("pointerdown", (e) => {
+  tapStartX = e.clientX;
+  tapStartY = e.clientY;
+
+  if (
+    dictPopup &&
+    !dictPopup.contains(e.target) &&
+    !e.target.closest(".tap-word")
+  ) {
+    dictPopup.classList.add("hidden");
+  }
+});
+
+document.addEventListener("pointerup", (e) => {
   if (readingView.classList.contains("hidden")) return;
   if (dictPopup && dictPopup.contains(e.target)) return;
 
-  // Si du texte est déjà sélectionné nativement, on ne fait rien ici (laissé à selectionchange)
-  const sel = window.getSelection();
-  if (sel && sel.toString().trim().length > 0) {
+  // Si l'utilisateur a fait défiler l'écran de plus de 10 pixels, on annule le Tap
+  if (
+    Math.abs(e.clientX - tapStartX) > 10 ||
+    Math.abs(e.clientY - tapStartY) > 10
+  ) {
     return;
   }
 
-  // S'il n'y a pas de sélection, c'est un Tap pur !
   let targetElement = e.target;
   if (targetElement && targetElement.nodeType === 3)
     targetElement = targetElement.parentElement;
@@ -885,21 +906,12 @@ document.addEventListener("click", (e) => {
       ? targetElement.closest(".tap-word")
       : null
     : null;
+
   if (wordElement) {
+    if (e.cancelable) e.preventDefault();
     let text = wordElement.textContent.trim();
     let rect = wordElement.getBoundingClientRect();
     showDictionaryPopup(text, rect);
-  }
-});
-
-// Cacher le popup si on touche l'écran ailleurs (pointerdown)
-document.addEventListener("pointerdown", (e) => {
-  if (
-    dictPopup &&
-    !dictPopup.contains(e.target) &&
-    !e.target.closest(".tap-word")
-  ) {
-    dictPopup.classList.add("hidden");
   }
 });
 
