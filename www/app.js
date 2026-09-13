@@ -719,6 +719,16 @@ function getLemmaCandidates(word) {
   if (word.endsWith("ives")) candidates.push(word.slice(0, -4) + "if");
   else if (word.endsWith("ive")) candidates.push(word.slice(0, -3) + "if");
 
+  // Doubled consonant feminine endings (bon/bonne, gros/grosse, etc.)
+  if (word.endsWith("nnes") && word.length >= 5) candidates.push(word.slice(0, -3));
+  else if (word.endsWith("nne") && word.length >= 4) candidates.push(word.slice(0, -2));
+
+  if (word.endsWith("sses") && word.length >= 5) candidates.push(word.slice(0, -3));
+  else if (word.endsWith("sse") && word.length >= 4) candidates.push(word.slice(0, -2));
+
+  if (word.endsWith("ttes") && word.length >= 5) candidates.push(word.slice(0, -3));
+  else if (word.endsWith("tte") && word.length >= 4) candidates.push(word.slice(0, -2));
+
   if (word.endsWith("es") && word.length > 3) {
     candidates.push(word.slice(0, -2));
     candidates.push(word.slice(0, -1));
@@ -963,64 +973,7 @@ const DictionaryService = {
       "",
     );
 
-    let matchedWord = cleanWord;
-    let conciseDef = "";
-    let nature = "単語";
-    let entries = null;
-
-    // 1. Priorité absolue aux formes grammaticales essentielles (homonymes fréquents: est -> être, bonne -> bon, etc.)
-    if (PRIORITY_LEMMAS[cleanWord]) {
-      const p = PRIORITY_LEMMAS[cleanWord];
-      matchedWord = p.lemma;
-      conciseDef = p.def;
-      nature = p.pos;
-    } else if (this.isLoaded && this.db) {
-      if (this.db[cleanWord]) {
-        entries = this.db[cleanWord];
-        matchedWord = cleanWord;
-      } else {
-        const candidates = getLemmaCandidates(cleanWord);
-        for (const cand of candidates) {
-          if (PRIORITY_LEMMAS[cand]) {
-            const p = PRIORITY_LEMMAS[cand];
-            matchedWord = p.lemma;
-            conciseDef = p.def;
-            nature = p.pos;
-            break;
-          }
-          if (this.db[cand]) {
-            entries = this.db[cand];
-            matchedWord = cand;
-            break;
-          }
-        }
-      }
-    }
-
-    if (entries && entries.length > 0 && !conciseDef) {
-      const jpWords = [];
-      const posTags = [];
-      for (const entry of entries) {
-        const term = (
-          entry.k && entry.k.length > 0
-            ? entry.k[0]
-            : entry.r && entry.r.length > 0
-              ? entry.r[0]
-              : ""
-        ).trim();
-        const cleanTerm = term.replace(/[\(（].*?[\)）]/g, "").trim();
-        if (cleanTerm && !jpWords.includes(cleanTerm)) {
-          jpWords.push(cleanTerm);
-        }
-        if (entry.p) posTags.push(...entry.p);
-      }
-      conciseDef = jpWords.slice(0, 3).join("、");
-      const uniquePos = [...new Set(posTags)];
-      if (uniquePos.length > 0) nature = uniquePos[0];
-      else if (conciseDef) nature = "名詞";
-    }
-
-    // Complete, grammatically sound context sentence
+    // 1. Complete, grammatically sound context sentence
     let targetSentence = getShortTargetedContext(surroundingSentence, word);
     let traductionPhrase = "";
 
@@ -1090,6 +1043,153 @@ const DictionaryService = {
           console.warn("ML Kit offline translation error", mlErr);
         }
       }
+    }
+
+    // 2. Candidate lemmas and forms (automatic morphological analysis)
+    const lookupKeys = [cleanWord];
+    if (PRIORITY_LEMMAS[cleanWord]) {
+      const p = PRIORITY_LEMMAS[cleanWord];
+      if (!lookupKeys.includes(p.lemma)) lookupKeys.push(p.lemma);
+    }
+    const candidates = getLemmaCandidates(cleanWord);
+    for (const c of candidates) {
+      if (!lookupKeys.includes(c)) lookupKeys.push(c);
+      if (PRIORITY_LEMMAS[c] && !lookupKeys.includes(PRIORITY_LEMMAS[c].lemma)) {
+        lookupKeys.push(PRIORITY_LEMMAS[c].lemma);
+      }
+    }
+
+    // 3. Gather candidate senses from PRIORITY_LEMMAS and dict.json
+    const candidateSenses = [];
+
+    for (const key of lookupKeys) {
+      if (PRIORITY_LEMMAS[key]) {
+        const p = PRIORITY_LEMMAS[key];
+        candidateSenses.push({
+          word: p.lemma,
+          pos: p.pos,
+          def: p.def,
+          rawTerms: p.def.split("、").map((t) => t.replace(/〜/g, "").trim()),
+          priority: key === cleanWord ? 10 : 8,
+        });
+      }
+    }
+
+    if (this.isLoaded && this.db) {
+      for (const key of lookupKeys) {
+        if (this.db[key]) {
+          const entries = this.db[key];
+          const sensesByPos = {};
+          for (const e of entries) {
+            const term = (
+              e.k && e.k.length > 0
+                ? e.k[0]
+                : e.r && e.r.length > 0
+                  ? e.r[0]
+                  : ""
+            ).trim();
+            const cleanTerm = term.replace(/[\(（].*?[\)）]/g, "").trim();
+            if (!cleanTerm) continue;
+
+            let pos = "単語";
+            if (e.p && e.p.includes("動詞")) pos = "動詞";
+            else if (e.p && e.p.includes("形容詞")) pos = "形容詞";
+            else if (e.p && e.p.length > 0) pos = e.p[0];
+
+            if (
+              pos === "接続詞" &&
+              key !== "et" &&
+              key !== "mais" &&
+              key !== "ou"
+            )
+              continue;
+
+            if (!sensesByPos[pos]) sensesByPos[pos] = [];
+            if (!sensesByPos[pos].includes(cleanTerm)) {
+              sensesByPos[pos].push(cleanTerm);
+            }
+          }
+
+          for (const pos in sensesByPos) {
+            const terms = sensesByPos[pos];
+            let posBonus = 0;
+            if (pos === "動詞") posBonus = 3;
+            else if (pos === "形容詞") posBonus = 2;
+            else if (pos === "名詞") posBonus = 1;
+
+            candidateSenses.push({
+              word: key,
+              pos: pos,
+              def: terms.slice(0, 3).join("、"),
+              rawTerms: terms,
+              priority: (key === cleanWord ? 6 : 4) + posBonus,
+            });
+          }
+        }
+      }
+    }
+
+    // 4. Score candidate senses against the Japanese sentence translation (WSD)
+    if (traductionPhrase) {
+      for (const s of candidateSenses) {
+        for (const term of s.rawTerms) {
+          if (term && term.length >= 1 && traductionPhrase.includes(term)) {
+            s.priority += 50;
+            const remaining = s.rawTerms.filter((t) => t !== term);
+            s.def = [term, ...remaining].slice(0, 3).join("、");
+            break;
+          }
+        }
+      }
+    }
+
+    candidateSenses.sort((a, b) => b.priority - a.priority);
+
+    // De-duplicate senses with identical definitions
+    const uniqueSenses = [];
+    const seenDefs = new Set();
+    for (const s of candidateSenses) {
+      if (!seenDefs.has(s.def)) {
+        seenDefs.add(s.def);
+        uniqueSenses.push(s);
+      }
+    }
+
+    let conciseDef = "";
+    let nature = "単語";
+    let matchedWord = cleanWord;
+
+    if (uniqueSenses.length === 1) {
+      conciseDef = uniqueSenses[0].def;
+      nature = uniqueSenses[0].pos;
+      matchedWord = uniqueSenses[0].word;
+    } else if (uniqueSenses.length > 1) {
+      const s1 = uniqueSenses[0];
+      const s2 = uniqueSenses[1];
+      const p1 =
+        s1.pos === "形容詞"
+          ? "形"
+          : s1.pos === "動詞"
+            ? "動"
+            : s1.pos === "名詞"
+              ? "名"
+              : s1.pos;
+      const p2 =
+        s2.pos === "形容詞"
+          ? "形"
+          : s2.pos === "動詞"
+            ? "動"
+            : s2.pos === "名詞"
+              ? "名"
+              : s2.pos;
+
+      if (s1.pos !== s2.pos || s1.priority >= 50) {
+        conciseDef = `${s1.def}（${p1}）/ ${s2.def}（${p2}）`;
+      } else {
+        conciseDef = s1.def;
+      }
+      nature = s1.pos;
+      matchedWord = s1.word;
     }
 
     if (!traductionPhrase) {
