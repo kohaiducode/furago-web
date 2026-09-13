@@ -957,8 +957,6 @@ const dictAudioBtn = document.getElementById("dict-audio-btn");
 let currentDictText = "";
 const translationCache = new Map(); // Cache pour mémoriser les traductions
 
-
-
 // --- GESTION DU CLIC / TAP SIMPLE SUR UN MOT ---
 let tapStartX = 0;
 let tapStartY = 0;
@@ -1027,22 +1025,23 @@ document.addEventListener("selectionchange", () => {
       if (latestText === text && currentSelection.rangeCount > 0) {
         let range = currentSelection.getRangeAt(0);
         let rect = range.getBoundingClientRect();
-        
+
         let container = range.commonAncestorContainer;
         if (container.nodeType === 3) container = container.parentElement;
-        
+
         // Find surrounding sentence
         const paragraphText = container.textContent || "";
         const sentences = paragraphText.split(/(?<=[.!?])\s+/);
-        let surroundingSentence = sentences.find(s => s.includes(latestText)) || paragraphText;
-        
+        let surroundingSentence =
+          sentences.find((s) => s.includes(latestText)) || paragraphText;
+
         showDictionaryPopup(latestText, surroundingSentence, rect);
       }
     }, 400);
   } else if (!text || text.length === 0) {
     dictPopup.classList.add("hidden");
   }
-}););
+});
 
 // Fonction commune pour afficher le popup et traduire
 let currentDictData = null;
