@@ -598,34 +598,28 @@ function getShortTargetedContext(paragraphText, word) {
 
   const cleanWord = (word || "").trim().toLowerCase();
   let sentence =
+    sentences.find((s) => {
+      const regex = new RegExp(
+        `(^|[^a-zA-ZÀ-ÿœŒæÆ])${cleanWord.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-zA-ZÀ-ÿœŒæÆ]|$)`,
+        "i",
+      );
+      return regex.test(s);
+    }) ||
     sentences.find((s) => s.toLowerCase().includes(cleanWord)) ||
     sentences[0] ||
     clean;
 
-  const words = sentence.trim().split(/\s+/);
-  if (words.length > 14) {
-    const clauses = sentence
-      .split(/[,:;—–«»"()]\s*/)
-      .map((c) => c.trim())
-      .filter(Boolean);
-    const targetClause = clauses.find((c) =>
-      c.toLowerCase().includes(cleanWord),
+  // If a sentence is very long (> 22 words) with clear clause breaks like ;, :, or dash, keep the clause with the word
+  if (sentence.split(/\s+/).length > 22) {
+    const subParts = sentence.split(/[;:—–]\s*/).filter(Boolean);
+    const partWithWord = subParts.find((p) =>
+      p.toLowerCase().includes(cleanWord),
     );
-    if (
-      targetClause &&
-      targetClause.split(/\s+/).length >= 3 &&
-      targetClause.split(/\s+/).length <= 12
-    ) {
-      sentence = targetClause;
-    } else {
-      const idx = words.findIndex((w) => w.toLowerCase().includes(cleanWord));
-      if (idx !== -1) {
-        const start = Math.max(0, idx - 4);
-        const end = Math.min(words.length, idx + 5);
-        sentence = words.slice(start, end).join(" ");
-      }
+    if (partWithWord && partWithWord.split(/\s+/).length >= 4) {
+      sentence = partWithWord;
     }
   }
+
   return sentence.trim();
 }
 
@@ -694,6 +688,7 @@ function repositionPopup(rect) {
 const DictionaryService = {
   db: null,
   isLoaded: false,
+  sentenceCache: new Map(),
 
   async init() {
     try {
@@ -765,50 +760,74 @@ const DictionaryService = {
     posTags = [...new Set(posTags)];
     let nature = posTags.length > 0 ? posTags[0] : conciseDef ? "名詞" : "単語";
 
-    // Targeted short context sentence (e.g. "Jocondeは絵画です。")
-    let shortContextSentence = getShortTargetedContext(
-      surroundingSentence,
-      word,
-    );
+    // Complete, grammatically sound context sentence
+    let targetSentence = getShortTargetedContext(surroundingSentence, word);
     let traductionPhrase = "";
 
-    if (shortContextSentence && shortContextSentence.length > 0) {
-      try {
-        if (
-          window.Capacitor &&
-          window.Capacitor.Plugins &&
-          window.Capacitor.Plugins.Translation
-        ) {
-          const result = await window.Capacitor.Plugins.Translation.translate({
-            text: shortContextSentence,
-            sourceLanguage: "fr",
-            targetLanguage: "ja",
-          });
-          if (result && result.text) {
-            traductionPhrase = result.text.trim();
-          } else if (result && result.translatedText) {
-            traductionPhrase = result.translatedText.trim();
-          }
-        }
-      } catch (e) {
-        console.warn("ML Kit sentence translation error", e);
+    if (targetSentence && targetSentence.length > 0) {
+      // 1. Instant cache lookup
+      if (
+        DictionaryService.sentenceCache &&
+        DictionaryService.sentenceCache.has(targetSentence)
+      ) {
+        traductionPhrase = DictionaryService.sentenceCache.get(targetSentence);
       }
 
-      // Online fallback if ML Kit is unavailable or failed
+      // 2. High-quality cloud neural translation (Google Translate API - natural native Japanese)
       if (!traductionPhrase) {
         try {
-          const res = await fetch(
-            `https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(shortContextSentence)}`,
-          );
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1800);
+          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(targetSentence)}`;
+          const res = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
           if (res.ok) {
             const data = await res.json();
             traductionPhrase = data[0]
               .map((item) => item[0])
               .join("")
               .trim();
+            if (traductionPhrase && DictionaryService.sentenceCache) {
+              DictionaryService.sentenceCache.set(
+                targetSentence,
+                traductionPhrase,
+              );
+            }
           }
         } catch (netErr) {
-          // offline
+          // Network offline or timeout -> fall back to offline ML Kit
+        }
+      }
+
+      // 3. Offline fallback to on-device ML Kit
+      if (!traductionPhrase) {
+        try {
+          if (
+            window.Capacitor &&
+            window.Capacitor.Plugins &&
+            window.Capacitor.Plugins.Translation
+          ) {
+            const result = await window.Capacitor.Plugins.Translation.translate(
+              {
+                text: targetSentence,
+                sourceLanguage: "fr",
+                targetLanguage: "ja",
+              },
+            );
+            if (result && result.text) {
+              traductionPhrase = result.text.trim();
+            } else if (result && result.translatedText) {
+              traductionPhrase = result.translatedText.trim();
+            }
+            if (traductionPhrase && DictionaryService.sentenceCache) {
+              DictionaryService.sentenceCache.set(
+                targetSentence,
+                traductionPhrase,
+              );
+            }
+          }
+        } catch (mlErr) {
+          console.warn("ML Kit offline translation error", mlErr);
         }
       }
     }
