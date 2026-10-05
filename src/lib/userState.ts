@@ -17,9 +17,19 @@ export interface WordList {
   name: string;
 }
 
+/**
+ * A word Furago considers learned from a genuinely completed article.
+ * Intentionally minimal: definitions/translations stay in the global dictionary.
+ */
+export interface LearnedWord {
+  word: string; // canonical French lemma
+  articleIds: string[]; // articles that contributed this word
+}
+
 export interface UserState {
   level: string;
   savedVocabulary: SavedWord[];
+  learnedVocabulary: LearnedWord[]; // auto-learned from completed articles; never mixed with savedVocabulary
   wordLists: WordList[];
   completedArticles: string[]; // previously furago_xp_articles
   quizResults: string[]; // previously furago_xp_quizzes
@@ -42,6 +52,7 @@ const STATE_KEY = "furago:user-state:v1";
 const DEFAULT_STATE: UserState = {
   level: "LVL_1",
   savedVocabulary: [],
+  learnedVocabulary: [],
   wordLists: [
     { id: "default", name: "すべて" }
   ],
@@ -71,6 +82,9 @@ export const loadUserState = (): UserState => {
       const s = { ...DEFAULT_STATE, ...parsed };
       if (!["LVL_1", "LVL_2", "LVL_3", "LVL_4"].includes(s.level)) {
         s.level = "LVL_1";
+      }
+      if (!Array.isArray(s.learnedVocabulary)) {
+        s.learnedVocabulary = [];
       }
       return s;
     }
@@ -148,4 +162,40 @@ export const updateUserState = (updates: Partial<UserState>): UserState => {
   const next = { ...current, ...updates };
   saveUserState(next);
   return next;
+};
+
+/** Case-insensitive, Unicode-normalized key used to deduplicate learned words. */
+export const learnedWordKey = (word: string): string =>
+  word.normalize("NFC").trim().toLocaleLowerCase("fr");
+
+/**
+ * Pure helper: merges `words` learned from `articleId` into `existing`.
+ * - The same lemma (case-insensitive) is never stored twice.
+ * - If the lemma already exists, articleId is appended once to its articleIds.
+ * Returns a new array; does not persist anything.
+ */
+export const mergeLearnedVocabulary = (
+  existing: LearnedWord[],
+  words: string[],
+  articleId: string
+): LearnedWord[] => {
+  const result = existing.map((w) => ({ ...w, articleIds: [...w.articleIds] }));
+  const index = new Map<string, number>();
+  result.forEach((w, i) => index.set(learnedWordKey(w.word), i));
+
+  for (const raw of words) {
+    const word = raw.normalize("NFC").trim();
+    if (!word) continue;
+    const key = learnedWordKey(word);
+    const at = index.get(key);
+    if (at !== undefined) {
+      if (!result[at].articleIds.includes(articleId)) {
+        result[at].articleIds.push(articleId);
+      }
+    } else {
+      index.set(key, result.length);
+      result.push({ word, articleIds: [articleId] });
+    }
+  }
+  return result;
 };

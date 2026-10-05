@@ -1,6 +1,6 @@
 "use client";
 
-import { loadUserState, updateUserState, UserState } from "../lib/userState";
+import { loadUserState, updateUserState, UserState, LearnedWord, mergeLearnedVocabulary } from "../lib/userState";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
 
@@ -88,6 +88,10 @@ interface TtsQueueItem {
 
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
 const LEVELS = ["LVL_1", "LVL_2", "LVL_3", "LVL_4"];
+// Reserved id for the read-only system list "📚 Furago — Mots appris".
+// Never part of wordLists, so it cannot be renamed, deleted, or used as a save target.
+const LEARNED_LIST_ID = "__furago_learned__";
+const LEARNED_LIST_NAME = "📚 Furago — Mots appris";
 
 function extractDriveId(url?: string): string | null {
   if (!url) return null;
@@ -197,6 +201,8 @@ export default function FuragoApp({
     { id: "default", name: "デフォルト" },
   ]);
   const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
+  // System list (read-only): words Furago considers learned from completed articles.
+  const [learnedWords, setLearnedWords] = useState<LearnedWord[]>([]);
   const [currentListId, setCurrentListId] = useState<string | null>(null);
   const [listSelectorOpen, setListSelectorOpen] = useState<boolean>(false);
   const [newListModalOpen, setNewListModalOpen] = useState<boolean>(false);
@@ -295,12 +301,13 @@ export default function FuragoApp({
     });
   }, []);
 
-  const checkAndAwardArticleXP = useCallback((articleId: string) => {
+  const checkAndAwardArticleXP = useCallback((articleId: string, targetVocab?: string[]) => {
     const state = loadUserState();
     const done = [...state.completedArticles];
     const progressKey = `${articleId}::${globalLevel}`;
     const newProgress = { ...state.articleProgress };
     let shouldUpdate = false;
+    let newLearnedVocab = state.learnedVocabulary;
     
     if (newProgress[progressKey] !== undefined) {
       delete newProgress[progressKey];
@@ -310,11 +317,16 @@ export default function FuragoApp({
     if (!done.includes(articleId)) {
       done.push(articleId);
       addXP(20);
+      
+      if (targetVocab && targetVocab.length > 0) {
+        newLearnedVocab = mergeLearnedVocabulary(state.learnedVocabulary, targetVocab, articleId);
+      }
+      
       shouldUpdate = true;
     }
     
     if (shouldUpdate) {
-      updateUserState({ completedArticles: done, articleProgress: newProgress });
+      updateUserState({ completedArticles: done, articleProgress: newProgress, learnedVocabulary: newLearnedVocab });
     }
   }, [addXP, globalLevel]);
 
@@ -369,19 +381,52 @@ export default function FuragoApp({
   const [vocabReviewWords, setVocabReviewWords] = useState<SavedWord[]>([]);
   const [vocabReviewAnswers, setVocabReviewAnswers] = useState<string[][]>([]);
   const [vocabReviewSelected, setVocabReviewSelected] = useState<string | null>(null);
+  const [vocabReviewReturnTo, setVocabReviewReturnTo] = useState<"home" | "words">("home");
 
-  const startVocabReview = () => {
-    if (savedWords.length === 0) {
+  const startVocabReview = async (source: "saved" | "learned" = "saved") => {
+    let sourceWords: import("../lib/userState").SavedWord[] = [];
+    
+    if (source === "saved") {
+      sourceWords = savedWords;
+    } else {
+      if (learnedWords.length === 0) return;
+      
+      const shuffledLearned = [...learnedWords].sort(() => 0.5 - Math.random());
+      const resolvedWords: import("../lib/userState").SavedWord[] = [];
+      
+      for (const lw of shuffledLearned) {
+         const dictRes = await DictionaryService.lookupWord(lw.word, "");
+         if (dictRes && (dictRes.conciseDef || dictRes.definitions?.length > 0)) {
+            resolvedWords.push({
+               fr: lw.word,
+               originalWord: lw.word,
+               conciseDef: dictRes.conciseDef || dictRes.definitions?.[0] || "",
+               ja: "",
+               nature: dictRes.nature || "",
+               gender: dictRes.gender || "",
+               phraseOriginale: dictRes.phraseOriginale || "",
+               traductionPhrase: dictRes.traductionPhrase || "",
+               date: new Date().toLocaleDateString("en-CA"),
+               listId: "learned"
+            });
+            if (resolvedWords.length === 5) break;
+         }
+      }
+      sourceWords = resolvedWords;
+    }
+
+    if (sourceWords.length === 0) {
       setVocabReviewWords([]);
       setVocabReviewAnswers([]);
       setVocabReviewIndex(0);
       setVocabReviewSelected(null);
+      setVocabReviewReturnTo(source === "saved" ? "home" : "words");
       setActiveView("vocab_review");
       window.scrollTo(0,0);
       return;
     }
 
-    const shuffled = [...savedWords].sort(() => 0.5 - Math.random());
+    const shuffled = [...sourceWords].sort(() => 0.5 - Math.random());
     
     // Avoid selecting the exact same French word more than once in one review session
     const uniqueFrSelected: import("../lib/userState").SavedWord[] = [];
@@ -395,7 +440,7 @@ export default function FuragoApp({
     }
     const selected = uniqueFrSelected;
 
-    const allMeanings = Array.from(new Set(savedWords.map(w => w.conciseDef || w.ja).filter(Boolean)));
+    const allMeanings = Array.from(new Set(sourceWords.map(w => w.conciseDef || w.ja).filter(Boolean)));
     
     const optionsList = selected.map(word => {
        const correctMeaning = word.conciseDef || word.ja;
@@ -419,6 +464,7 @@ export default function FuragoApp({
     setVocabReviewAnswers(optionsList);
     setVocabReviewIndex(0);
     setVocabReviewSelected(null);
+    setVocabReviewReturnTo(source === "saved" ? "home" : "words");
     setActiveView("vocab_review");
     window.scrollTo(0,0);
   };
@@ -496,8 +542,13 @@ export default function FuragoApp({
       const q = currentArticle.levels[globalLevel]?.quiz;
       if (!q || q.length === 0) {
         if (noQuizCompleted) {
+          // Intentional: completion rewards are applied when the completion state is reached (deduplicated in userState).
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           updateStreak();
-          checkAndAwardArticleXP(currentArticle.id.toString());
+          checkAndAwardArticleXP(
+            currentArticle.id.toString(),
+            currentArticle.levels[globalLevel]?.targetVocabulary
+          );
           if (dailyArticle && currentArticle.id === dailyArticle.id) {
             updateUserState({ dailyMissionCompletedDate: todayStr });
             setLastCompletedDate(todayStr);
@@ -506,7 +557,10 @@ export default function FuragoApp({
         }
       } else if (quizIndex >= q.length) {
         updateStreak();
-        checkAndAwardArticleXP(currentArticle.id.toString());
+        checkAndAwardArticleXP(
+          currentArticle.id.toString(),
+          currentArticle.levels[globalLevel]?.targetVocabulary
+        );
         checkAndAwardQuizXP(currentArticle.id.toString(), quizScore === q.length);
         if (dailyArticle && currentArticle.id === dailyArticle.id) {
           updateUserState({ dailyMissionCompletedDate: todayStr });
@@ -550,6 +604,8 @@ export default function FuragoApp({
     // Load centralized user state
     try {
       const state = loadUserState();
+      // Intentional: user state lives in localStorage and must be hydrated after mount to avoid SSR mismatch.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setGlobalLevel(state.level);
       setLastCompletedDate(state.dailyMissionCompletedDate);
       setLastVocabReviewDate(state.vocabReviewXPDate);
@@ -560,6 +616,7 @@ export default function FuragoApp({
       setTotalXP(state.xp);
       setWordLists(state.wordLists);
       setSavedWords(state.savedVocabulary);
+      setLearnedWords(state.learnedVocabulary);
       if (localStorage.getItem("furago_lead_subscribed") === "1") {
         setShowLeadBar(false);
       } else {
@@ -687,7 +744,7 @@ export default function FuragoApp({
     let match: RegExpExecArray | null;
     paragraphs.forEach((p) => {
       const text = p.fr;
-      let offset = currentIndex;
+      const offset = currentIndex;
       while ((match = regex.exec(text)) !== null) {
         if (match[0].trim().length > 0) {
           q.push({
@@ -764,6 +821,8 @@ export default function FuragoApp({
     utterance.onend = () => {
       if (isPlayingRef.current && !isPausedRef.current) {
         queueIndexRef.current += 1;
+        // Intentional recursion: onend runs asynchronously, after this stable ([] deps) callback is initialized.
+        // eslint-disable-next-line react-hooks/immutability
         playNextInQueue();
       }
     };
@@ -1031,7 +1090,7 @@ export default function FuragoApp({
 
     const updated = [...savedWords, newWord];
     setSavedWords(updated);
-    updateUserState({ savedVocabulary: updated as any });
+    updateUserState({ savedVocabulary: updated });
     showToast(t.toasts.saved);
   };
 
@@ -1045,7 +1104,7 @@ export default function FuragoApp({
     };
     const updated = [...wordLists, newList];
     setWordLists(updated);
-    updateUserState({ wordLists: updated as any });
+    updateUserState({ wordLists: updated });
     setNewListName("");
     setNewListModalOpen(false);
     showToast(t.toasts.listCreated);
@@ -1057,7 +1116,7 @@ export default function FuragoApp({
       (w) => !(w.fr === wordFr && w.listId === listId)
     );
     setSavedWords(updated);
-    updateUserState({ savedVocabulary: updated as any });
+    updateUserState({ savedVocabulary: updated });
     showToast(t.toasts.deleted);
   };
 
@@ -1311,8 +1370,8 @@ export default function FuragoApp({
                 backgroundColor:
                   isHighlighted &&
                   highlightRange.length > 0 &&
-                  startIdx >= sentenceStart + highlightRange.start &&
-                  startIdx < sentenceStart + highlightRange.start + highlightRange.length
+                  startIdx >= highlightRange.start &&
+                  startIdx < highlightRange.start + highlightRange.length
                     ? "rgba(0, 122, 255, 0.15)"
                     : "transparent",
                 borderRadius: "4px",
@@ -1509,80 +1568,71 @@ return (
       )}
 
       {/* App Header */}
-      <header className="app-header" style={{ position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', background: 'var(--surface)', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-        {activeView === "reading" && (
-          <button
-            className="back-btn"
-            onClick={() => {
-              stopAudio();
-              setDictOpen(false);
-              setActiveView("home");
-            }}
-            aria-label="Back"
-            style={{ padding: '8px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6"></polyline>
-            </svg>
-          </button>
-        )}
-        <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0', color: 'var(--primary)', letterSpacing: '-0.5px', marginLeft: activeView === 'reading' ? '8px' : '0' }}>Furago</h1>
-        {currentStreak > 0 && (
-          <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '16px', padding: '4px 10px', fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-            <span style={{ marginRight: '4px' }}>🔥</span> {currentStreak} {appLang === 'ja' ? '日' : 'jours'}
-          </div>
-        )}
-        {totalXP > 0 && (
-          <div style={{ marginLeft: currentStreak > 0 ? '8px' : '12px', display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '16px', padding: '4px 10px', fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-            <span style={{ marginRight: '4px', color: 'var(--primary)' }}>★</span> Level {Math.floor(totalXP / 100) + 1} <span style={{ color: 'var(--text-muted)', marginLeft: '6px', fontWeight: 600 }}>{totalXP} XP</span>
-          </div>
-        )}
-        
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {activeView === "reading" && (
+      <header className="app-header">
+        <div className="header-left">
+          {activeView === "reading" && (
+            <button
+              className="back-btn"
+              onClick={() => {
+                stopAudio();
+                setDictOpen(false);
+                setActiveView("home");
+              }}
+              aria-label="Back"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+          )}
+          <h1 className="header-title" style={{ marginLeft: activeView === 'reading' ? '4px' : '0' }}>Furago</h1>
+        </div>
+
+        <div className="header-right">
+          {(currentStreak > 0 || totalXP > 0) && (
+            <div className="header-stats-compact">
+              {currentStreak > 0 && (
+                <div className="stat-item" title={appLang === 'ja' ? 'ストリーク' : 'Streak'}>
+                  <span className="stat-icon">🔥</span>
+                  <span className="stat-val">{currentStreak}</span>
+                  <span className="stat-label desktop-only">&nbsp;{appLang === 'ja' ? '日' : 'jours'}</span>
+                </div>
+              )}
+              {totalXP > 0 && (
+                <div className="stat-item" title={appLang === 'ja' ? 'XPとレベル' : 'Level & XP'}>
+                  <span className="stat-icon" style={{color: 'var(--primary)'}}>★</span>
+                  <span className="stat-label desktop-only">Level&nbsp;</span>
+                  <span className="stat-val">{Math.floor(totalXP / 100) + 1}</span>
+                  <span className="stat-xp"><span className="desktop-only">&nbsp;(</span><span className="mobile-only">&nbsp;</span>{totalXP}<span className="desktop-only">&nbsp;XP)</span><span className="mobile-only">XP</span></span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeView === "reading" && (
             <button
                 className="header-level-btn"
                 onClick={() => setFilterModalType("level")}
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '16px', padding: '4px 10px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', color: 'var(--text-main)' }}
             >
-                {t.levels[globalLevel as keyof typeof t.levels] || globalLevel} ▾
+                <span className="level-text">{t.levels[globalLevel as keyof typeof t.levels] || globalLevel}</span>
+                <span className="level-arrow">▾</span>
             </button>
-            )}
-            
-            <div style={{ display: 'flex', background: 'var(--bg)', borderRadius: '20px', padding: '2px', border: '1px solid var(--border)' }}>
-              <button 
-                onClick={() => setAppLang("ja")}
-                style={{
-                  background: appLang === 'ja' ? 'var(--primary)' : 'transparent',
-                  color: appLang === 'ja' ? 'white' : 'var(--text-muted)',
-                  border: 'none',
-                  borderRadius: '18px',
-                  padding: '4px 8px',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
-              >
-                🇯🇵 JP
-              </button>
-              <button 
-                onClick={() => setAppLang("en")}
-                style={{
-                  background: appLang === 'en' ? 'var(--primary)' : 'transparent',
-                  color: appLang === 'en' ? 'white' : 'var(--text-muted)',
-                  border: 'none',
-                  borderRadius: '18px',
-                  padding: '4px 8px',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
-              >
-                🇬🇧 EN
-              </button>
-            </div>
+          )}
+
+          <div className="lang-toggle-container">
+            <button 
+              className={`lang-toggle-btn ${appLang === 'ja' ? 'active' : ''}`}
+              onClick={() => setAppLang("ja")}
+            >
+              🇯🇵<span className="lang-text"> JP</span>
+            </button>
+            <button 
+              className={`lang-toggle-btn ${appLang === 'en' ? 'active' : ''}`}
+              onClick={() => setAppLang("en")}
+            >
+              🇬🇧<span className="lang-text"> EN</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1631,7 +1681,7 @@ return (
                     <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
                       {typeof continueArticle.levels[globalLevel]?.title === 'string' 
                          ? continueArticle.levels[globalLevel]?.title 
-                         : (continueArticle.levels[globalLevel]?.title as any)?.fr || continueArticle.originalTitle}
+                         : (continueArticle.levels[globalLevel]?.title as TranslatableText | undefined)?.fr || continueArticle.originalTitle}
                     </h3>
                     <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
                       {t.levels[globalLevel as keyof typeof t.levels]}
@@ -1666,7 +1716,7 @@ return (
                     <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
                       {typeof dailyArticle.levels[globalLevel]?.title === 'string' 
                          ? dailyArticle.levels[globalLevel]?.title 
-                         : (dailyArticle.levels[globalLevel]?.title as any)?.fr || dailyArticle.originalTitle}
+                         : (dailyArticle.levels[globalLevel]?.title as TranslatableText | undefined)?.fr || dailyArticle.originalTitle}
                     </h3>
                     <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
                       {t.levels[globalLevel as keyof typeof t.levels]} · 5 min
@@ -1699,7 +1749,7 @@ return (
                 </div>
                 <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>{Math.min(5, savedWords.length)} mots</p>
                 <button 
-                  onClick={startVocabReview}
+                  onClick={() => startVocabReview("saved")}
                   style={{ width: '100%', padding: '14px', borderRadius: '16px', border: 'none', background: isVocabReviewCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isVocabReviewCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
                 >
                   {isVocabReviewCompletedToday ? 'もう一度復習する' : 'Réviser'}
@@ -1723,7 +1773,7 @@ return (
                     <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
                       {typeof currentSeriesNextEp.levels[globalLevel]?.title === 'string' 
                          ? currentSeriesNextEp.levels[globalLevel]?.title 
-                         : (currentSeriesNextEp.levels[globalLevel]?.title as any)?.fr || currentSeriesNextEp.originalTitle}
+                         : (currentSeriesNextEp.levels[globalLevel]?.title as TranslatableText | undefined)?.fr || currentSeriesNextEp.originalTitle}
                     </h3>
                     <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
                       Episode {currentSeriesNextEp.seriesOrder || '?'}
@@ -1868,7 +1918,7 @@ return (
                 );
               })()
             )}
-            <h2 lang="fr">{typeof currentLevelData.title === "string" ? currentLevelData.title : (currentLevelData.title as any)?.fr}</h2>
+            <h2 lang="fr">{typeof currentLevelData.title === "string" ? currentLevelData.title : (currentLevelData.title as TranslatableText)?.fr}</h2>
             <div
               style={{
                 display: "flex",
@@ -1888,7 +1938,7 @@ return (
                   fontSize: "0.85rem",
                 }}
               >
-                {typeof currentArticle.category === "string" ? currentArticle.category : (currentArticle.category as any)?.[appLang] || "General"}
+                {typeof currentArticle.category === "string" ? currentArticle.category : (currentArticle.category as TranslatableText | undefined)?.[appLang] || "General"}
               </span>
               {currentArticle.date && (
                 <span
@@ -1922,7 +1972,7 @@ return (
                <p style={{ margin: "0", fontSize: "0.95rem", fontWeight: 600, color: "var(--text-main)", lineHeight: "1.5" }}>
                  {typeof currentLevelData.learningGoal === 'string' 
                    ? currentLevelData.learningGoal 
-                   : (currentLevelData.learningGoal as any)[appLang === 'ja' ? 'ja' : 'en'] || (currentLevelData.learningGoal as any).ja}
+                   : (currentLevelData.learningGoal as TranslatableText)[appLang === 'ja' ? 'ja' : 'en'] || (currentLevelData.learningGoal as TranslatableText).ja}
                </p>
              </div>
           )}
@@ -2064,7 +2114,7 @@ return (
                 onClick={() => setNoQuizCompleted(true)}
                 style={{ width: "100%", padding: "16px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.1rem", fontWeight: 700, cursor: "pointer" }}
               >
-                🎉 読み終わった (Mark as Completed)
+                {appLang === "ja" ? "🎉 読み終わった" : "🎉 Finished Reading"}
               </button>
             </div>
           )}
@@ -2077,16 +2127,20 @@ return (
           {vocabReviewWords.length === 0 ? (
             <div className="fade-in" style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
               <div style={{ fontSize: '4rem', marginBottom: '16px' }}>📚</div>
-              <h1 style={{ fontSize: '1.5rem', marginBottom: '16px', color: 'var(--text-main)' }}>まだ復習する単語がありません</h1>
-              <p style={{ fontSize: '1.05rem', marginBottom: '32px', color: 'var(--text-muted)' }}>記事を読んで、新しい単語を保存しましょう。</p>
+              <h1 style={{ fontSize: '1.5rem', marginBottom: '16px', color: 'var(--text-main)' }}>
+                {appLang === "ja" ? "まだ復習する単語がありません" : "No words to review yet"}
+              </h1>
+              <p style={{ fontSize: '1.05rem', marginBottom: '32px', color: 'var(--text-muted)' }}>
+                {appLang === "ja" ? "もっと記事を読んで、語彙を増やしましょう。" : "Read more articles to expand your vocabulary."}
+              </p>
               <button
                 onClick={() => {
-                  setActiveView("home");
+                  setActiveView(vocabReviewReturnTo);
                   window.scrollTo(0,0);
                 }}
                 style={{ width: '100%', padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
               >
-                ホームに戻る
+                {appLang === "ja" ? "戻る" : "Back"}
               </button>
             </div>
           ) : vocabReviewIndex < vocabReviewWords.length ? (
@@ -2107,7 +2161,7 @@ return (
                     }}
                     style={{ padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
                   >
-                    覚えた
+                    {appLang === "ja" ? "覚えた" : "I know this"}
                   </button>
                 </div>
               ) : (
@@ -2165,17 +2219,21 @@ return (
           ) : (
             <div className="fade-in" style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
               <div style={{ fontSize: '4rem', marginBottom: '16px' }}>🎉</div>
-              <h1 style={{ fontSize: '1.8rem', marginBottom: '16px', color: 'var(--text-main)' }}>復習完了！</h1>
-              <p style={{ fontSize: '1.1rem', marginBottom: '32px', color: 'var(--text-muted)' }}>よくできました！</p>
+              <h1 style={{ fontSize: '1.8rem', marginBottom: '16px', color: 'var(--text-main)' }}>
+                {appLang === "ja" ? "復習完了！" : "Review Completed!"}
+              </h1>
+              <p style={{ fontSize: '1.1rem', marginBottom: '32px', color: 'var(--text-muted)' }}>
+                {appLang === "ja" ? "よくできました！" : "Great job!"}
+              </p>
               <button
                 onClick={() => {
                   checkAndAwardVocabReviewXP();
-                  setActiveView("home");
+                  setActiveView(vocabReviewReturnTo);
                   window.scrollTo(0,0);
                 }}
                 style={{ width: '100%', padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
               >
-                ホームに戻る
+                {appLang === "ja" ? "戻る" : "Back"}
               </button>
             </div>
           )}
@@ -2216,6 +2274,62 @@ return (
               </div>
 
               <div style={{ display: "grid", gap: "12px" }}>
+                {/* System list (read-only): learned from completed articles */}
+                <div
+                  onClick={() => setCurrentListId(LEARNED_LIST_ID)}
+                  className="quiz-card"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "12px",
+                    cursor: "pointer",
+                    marginBottom: 0,
+                    background: "linear-gradient(135deg, var(--primary-light), var(--surface) 70%)",
+                    border: "1px solid var(--primary-light)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "14px", minWidth: 0 }}>
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        background: "var(--surface)",
+                        width: "44px",
+                        height: "44px",
+                        borderRadius: "12px",
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        fontSize: "1.35rem",
+                        flexShrink: 0,
+                      }}
+                    >
+                      📚
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <h3 lang="fr" style={{ fontSize: "1.1rem", fontWeight: 700 }}>
+                        Furago — Mots appris
+                      </h3>
+                      <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                        {learnedWords.length} {t.words.wordCount} · {appLang === "ja" ? "読了した記事から自動で追加" : "Added automatically from completed articles"}
+                      </span>
+                    </div>
+                  </div>
+                  <svg
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="var(--text-muted)"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ flexShrink: 0 }}
+                  >
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </div>
+
                 {wordLists.map((list) => {
                   const count = savedWords.filter(
                     (w) => (w.listId || "default") === list.id
@@ -2284,6 +2398,157 @@ return (
                   );
                 })}
               </div>
+            </div>
+          ) : currentListId === LEARNED_LIST_ID ? (
+            /* ─── System list detail: Furago — Mots appris (read-only) ─── */
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: "22px",
+                  gap: "12px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <button
+                    onClick={() => setCurrentListId(null)}
+                    style={{
+                      background: "var(--surface)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "50%",
+                      width: "38px",
+                      height: "38px",
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      fontSize: "1.1rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ←
+                  </button>
+                  <h2
+                    style={{
+                      fontSize: "1.2rem",
+                      fontWeight: 800,
+                      color: "var(--primary)",
+                      margin: 0,
+                    }}
+                  >
+                    {LEARNED_LIST_NAME}
+                  </h2>
+                </div>
+                
+                {learnedWords.length > 0 && (
+                  <button
+                    onClick={() => startVocabReview("learned")}
+                    style={{
+                      background: "var(--primary)",
+                      color: "white",
+                      border: "none",
+                      padding: "8px 16px",
+                      borderRadius: "20px",
+                      fontSize: "0.9rem",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                    }}
+                  >
+                    {appLang === "ja" ? "復習する" : "Réviser"}
+                  </button>
+                )}
+              </div>
+
+              {learnedWords.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "50px 20px",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  <div style={{ fontSize: "2.5rem", marginBottom: "16px" }}>📚</div>
+                  <p style={{ fontSize: "1rem", fontWeight: 600, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                    {appLang === "ja"
+                      ? "まだ学んだ単語はありません。\n記事を読んで完了すると、自動的に追加されます。"
+                      : "Aucun mot appris pour le moment.\nTerminez un article pour enrichir cette liste."}
+                  </p>
+                </div>
+              ) : (
+                learnedWords.map((lw, idx) => (
+                  <div
+                    key={`learned-${idx}`}
+                    className="quiz-card fade-in"
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "12px",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <h3
+                        lang="fr"
+                        className="tap-word"
+                        onClick={(e) => handleWordClick(e, lw.word, "")}
+                        style={{
+                          color: "var(--primary)",
+                          margin: 0,
+                          fontSize: "1.15rem",
+                          fontWeight: 700,
+                          wordBreak: "break-word",
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          textDecorationColor: "var(--border)",
+                          textUnderlineOffset: "4px"
+                        }}
+                      >
+                        {lw.word}
+                      </h3>
+                      <span
+                        style={{
+                          color: "var(--text-muted)",
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {appLang === "ja"
+                          ? `${lw.articleIds.length}つの記事から`
+                          : `${lw.articleIds.length} article${lw.articleIds.length > 1 ? "s" : ""}`}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => speakWord(lw.word)}
+                      title={t.words.listenPronunciation}
+                      style={{
+                        background: "var(--bg)",
+                        border: "1px solid var(--border)",
+                        color: "var(--green)",
+                        borderRadius: "50%",
+                        width: "36px",
+                        height: "36px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                        <path
+                          d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        ></path>
+                      </svg>
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           ) : (
             <div>
