@@ -826,8 +826,7 @@ export default function FuragoApp({
     paragraphText: string
   ) => {
     e.stopPropagation();
-    const clean = word.replace(/[.,!?:;"'()[\]«»„“”]/g, "").trim();
-    if (!clean) return;
+    if (!word.trim()) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     setDictRect(rect);
@@ -835,7 +834,7 @@ export default function FuragoApp({
     setDictLoading(true);
     setDictData(null);
 
-    const result = await DictionaryService.lookupWord(clean, paragraphText, appLang as "ja" | "en");
+    const result = await DictionaryService.lookupWord(word, paragraphText, appLang as "ja" | "en");
     setDictData(result);
     setDictLoading(false);
   };

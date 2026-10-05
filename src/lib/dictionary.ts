@@ -524,14 +524,12 @@ class DictionaryServiceClass {
       await this.init();
     }
 
-    let cleanWord = word
-      .toLowerCase()
-      .replace(/[.,!?:;"'()[\]«»„“”]/g, "")
-      .trim();
+    let cleanWord = word.toLowerCase().trim();
     cleanWord = cleanWord.replace(
       /^(l['’]|d['’]|qu['’]|j['’]|m['’]|t['’]|s['’]|n['’]|c['’]|ç['’])/,
       ""
     );
+    cleanWord = cleanWord.replace(/[.,!?:;"'()[\]«»„“”]/g, "");
 
     const targetSentence = getShortTargetedContext(surroundingSentence, word);
     let traductionPhrase = "";
@@ -622,7 +620,7 @@ class DictionaryServiceClass {
     return {
       mot: matchedWord,
       originalWord: word,
-      matchedLemma: matchedWord !== cleanWord ? matchedWord : null,
+      matchedLemma: matchedWord.toLowerCase() !== word.toLowerCase().trim() ? matchedWord : null,
       conciseDef,
       phraseOriginale: targetSentence,
       traductionPhrase,
