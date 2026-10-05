@@ -550,7 +550,7 @@ class DictionaryServiceClass {
           if (res.ok) {
             const data = await res.json();
             traductionPhrase = data[0]
-              .map((item: any[]) => item[0])
+              .map((item: string[]) => item[0])
               .join("")
               .trim();
             if (traductionPhrase) {
