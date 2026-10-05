@@ -242,7 +242,7 @@ function doPost(e) {
 
     const name = (data.name || data.firstName || "").trim();
     const gender = (data.gender || "回答しない").trim();
-    const level = (data.level || "A1").trim();
+    const level = (data.level || "LVL_1").trim();
     const categories = Array.isArray(data.categories)
       ? data.categories.join("、")
       : (data.categories || "すべて").trim();
@@ -314,10 +314,32 @@ function sendWelcomeEmail(user) {
   const rawFooter = String(values[7] || "Furago 運営チーム");
 
   // 変数（{{名前}}, {{レベル}}, {{カテゴリー}} および旧仏語変数）の置換
+  const getDisplayLevel = (lvl) => {
+    switch (lvl) {
+      case "LVL_1":
+      case "A1":
+        return "超初級 / Absolute Beginner";
+      case "LVL_2":
+      case "A2":
+        return "初級 / Beginner";
+      case "LVL_3":
+      case "B1":
+        return "中級 / Intermediate";
+      case "LVL_4":
+      case "B2":
+      case "C1":
+        return "上級 / Advanced";
+      default:
+        return lvl;
+    }
+  };
+
+  const displayLevel = getDisplayLevel(user.level || "LVL_1");
+
   const replaceVars = (str) => {
     return str
       .replace(/\{\{\s*(名前|prenom)\s*\}\}/gi, user.name || "")
-      .replace(/\{\{\s*(レベル|niveau)\s*\}\}/gi, user.level || "A1")
+      .replace(/\{\{\s*(レベル|niveau)\s*\}\}/gi, displayLevel)
       .replace(/\{\{\s*(カテゴリー|categories)\s*\}\}/gi, user.categories || "すべて");
   };
 
@@ -371,7 +393,7 @@ function sendWelcomeEmail(user) {
                 <div style="background-color: #f2f2f7; border-left: 4px solid #5e5ce6; border-radius: 8px; padding: 12px 16px; margin: 22px 0;">
                   <div style="font-size: 13px; color: #8e8e93; font-weight: bold; margin-bottom: 4px;">あなたの学習プロフィール</div>
                   <div style="font-size: 14px; color: #1c1c1e;">
-                    <strong>現在のレベル :</strong> ${escapeHtml(user.level)}<br>
+                    <strong>現在のレベル :</strong> ${escapeHtml(displayLevel)}<br>
                     <strong>興味のあるテーマ :</strong> ${escapeHtml(user.categories)}
                   </div>
                 </div>
