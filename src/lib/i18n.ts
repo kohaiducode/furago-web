@@ -1,0 +1,202 @@
+export type AppLanguage = 'ja' | 'en';
+
+export const translations = {
+  ja: {
+    appTitle: 'Furago',
+    levels: {
+      LVL_1: '超初級',
+      LVL_2: '初級',
+      LVL_3: '中級',
+      LVL_4: '上級'
+    },
+    nav: {
+      home: '記事',
+      words: '単語帳',
+      register: '登録',
+      leadBarText: '最新記事をメールでお届け！無料メルマガ登録',
+      leadBarBtn: '登録',
+      level: 'レベル',
+      category: 'カテゴリー'
+    },
+    reading: {
+      read: '読む',
+      quiz: 'クイズ',
+      showTranslation: '翻訳を表示',
+      hideTranslation: '翻訳を隠す',
+      prevSentence: '前の文',
+      playPause: '再生 / 一時停止',
+      nextSentence: '次の文',
+      restartAudio: '最初から再生',
+      audioSpeed: '音声スピード',
+      selectVoice: '音声の選択',
+      selectLevel: 'レベルを選択',
+      selectCategory: 'カテゴリーを選択',
+      translateQuestion: '翻訳を表示',
+      translateAnswer: '答えを翻訳する',
+      tapHint: '💡 単語をタップ（またはクリック）すると日本語の意味と文脈翻訳が表示されます'
+    },
+    quiz: {
+      score: 'スコア',
+      correct: '正解！',
+      wrong: '不正解...',
+      nextQuestion: '次の問題',
+      finish: '終了',
+      results: '結果',
+      outOf: '/',
+      points: '点',
+      backToArticle: '記事に戻る'
+    },
+    dict: {
+      save: '保存',
+      saveToList: '単語リストに保存',
+      createList: 'リストを作成',
+      createNewList: '新しいリストを作成',
+      add: '追加',
+      noDef: '定義が見つかりません',
+      loading: '検索中...',
+      context: '文脈',
+      lemma: '原形'
+    },
+    words: {
+      title: '単語帳',
+      noWords: '単語がありません',
+      delete: '削除',
+      date: '日付',
+      allLists: 'すべてのリスト',
+      defaultList: 'デフォルト',
+      wordCount: '単語',
+      newList: '新しいリスト',
+      list: 'リスト',
+      emptyList: 'このリストは空です。\n記事内でフランス語の単語をタップして追加しましょう！',
+      lemmaPrefix: '原形:',
+      listenPronunciation: '発音を聞く',
+      selectListToSave: '保存先リストを選択',
+      cancel: 'キャンセル',
+      newListNameTitle: '新しいリストの名前',
+      newListPlaceholder: '例：旅行フレーズ、動詞...',
+      create: '作成'
+    },
+    toasts: {
+      alreadyInList: 'すでにリストにあります',
+      saved: '保存しました !',
+      listCreated: 'リストを作成しました',
+      deleted: '削除しました',
+      emailRegistered: 'このメールアドレスは既に登録されています。',
+      enterAllFields: 'すべての項目を入力・選択してください。',
+      selectCategory: '興味のあるカテゴリーを1つ以上選んでください。',
+      registrationSuccess: 'ご登録ありがとうございます！確認メールを送信しました。'
+    },
+    newsletter: {
+      title: 'Furago ニュースレター登録',
+      step1: '基本情報',
+      step2: 'フランス語レベル',
+      step3: '興味のあるテーマ',
+      name: '名前',
+      email: 'メールアドレス',
+      gender: '性別',
+      cancel: 'キャンセル',
+      register: '登録',
+      submit: '登録する'
+    }
+  },
+  en: {
+    appTitle: 'Furago',
+    levels: {
+      LVL_1: 'Beginner',
+      LVL_2: 'Elementary',
+      LVL_3: 'Intermediate',
+      LVL_4: 'Advanced'
+    },
+    nav: {
+      home: 'Articles',
+      words: 'Vocabulary',
+      register: 'Register',
+      leadBarText: 'Get the latest articles by email! Free newsletter',
+      leadBarBtn: 'Register',
+      level: 'Level',
+      category: 'Category'
+    },
+    reading: {
+      read: 'Read',
+      quiz: 'Quiz',
+      showTranslation: 'Show Translation',
+      hideTranslation: 'Hide Translation',
+      prevSentence: 'Prev Sentence',
+      playPause: 'Play / Pause',
+      nextSentence: 'Next Sentence',
+      restartAudio: 'Restart Audio',
+      audioSpeed: 'Audio Speed',
+      selectVoice: 'Select Voice',
+      selectLevel: 'Select Level',
+      selectCategory: 'Select Category',
+      translateQuestion: 'Show Translation',
+      translateAnswer: 'Translate Answer',
+      tapHint: '💡 Tap (or click) a word to see its translation and context.'
+    },
+    quiz: {
+      score: 'Score',
+      correct: 'Correct!',
+      wrong: 'Incorrect...',
+      nextQuestion: 'Next Question',
+      finish: 'Finish',
+      results: 'Results',
+      outOf: '/',
+      points: 'points',
+      backToArticle: 'Back to Article'
+    },
+    dict: {
+      save: 'Save',
+      saveToList: 'Save to List',
+      createList: 'Create List',
+      createNewList: 'Create New List',
+      add: 'Add',
+      noDef: 'Definition not found',
+      loading: 'Loading...',
+      context: 'Context',
+      lemma: 'Lemma'
+    },
+    words: {
+      title: 'Vocabulary',
+      noWords: 'No words found',
+      delete: 'Delete',
+      date: 'Date',
+      allLists: 'All Lists',
+      defaultList: 'Default',
+      wordCount: 'words',
+      newList: 'New List',
+      list: 'List',
+      emptyList: 'This list is empty.\nTap French words in articles to add them!',
+      lemmaPrefix: 'Lemma:',
+      listenPronunciation: 'Listen to pronunciation',
+      selectListToSave: 'Select list to save',
+      cancel: 'Cancel',
+      newListNameTitle: 'New list name',
+      newListPlaceholder: 'e.g. Travel phrases, Verbs...',
+      create: 'Create'
+    },
+    toasts: {
+      alreadyInList: 'Already in the list',
+      saved: 'Saved!',
+      listCreated: 'List created',
+      deleted: 'Deleted',
+      emailRegistered: 'This email is already registered.',
+      enterAllFields: 'Please fill in all fields.',
+      selectCategory: 'Please select at least one category.',
+      registrationSuccess: 'Thank you for registering! A confirmation email has been sent.'
+    },
+    newsletter: {
+      title: 'Furago Newsletter Registration',
+      step1: 'Basic Info',
+      step2: 'French Level',
+      step3: 'Interests',
+      name: 'Name',
+      email: 'Email',
+      gender: 'Gender',
+      cancel: 'Cancel',
+      register: 'Register',
+      submit: 'Submit'
+    }
+  }
+};
+
+export const getTranslation = (lang: AppLanguage) => translations[lang] || translations.ja;

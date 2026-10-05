@@ -3,23 +3,52 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
 
+import { getTranslation, AppLanguage } from "@/lib/i18n";
+
+export interface TranslatableText {
+  fr: string;
+  ja: string;
+  en: string;
+}
+
+export interface Paragraph {
+  id: string;
+  fr: string;
+  ja: string;
+  en: string;
+}
+
+export interface QuizChoice {
+  id: string;
+  text: TranslatableText;
+  isCorrect: boolean;
+}
+
 export interface QuizQuestion {
-  text: string;
-  options: Record<string, string>;
-  answer: string;
+  id: string;
+  question: TranslatableText;
+  choices?: QuizChoice[];
+  // For backwards compatibility with old mock data
+  text?: string;
+  options?: Record<string, string>;
+  answer?: string;
 }
 
 export interface ArticleLevelData {
-  title: string;
-  content: string;
+  title: string | TranslatableText;
+  paragraphs: Paragraph[];
   quiz?: QuizQuestion[];
+  // For backwards compatibility
+  content?: string;
 }
+
+export type Category = TranslatableText | string;
 
 export interface Article {
   id: number | string;
   date?: string;
   originalTitle?: string;
-  category?: string;
+  category?: Category;
   imageUrl?: string;
   levels: Record<string, ArticleLevelData>;
 }
@@ -49,7 +78,7 @@ interface TtsQueueItem {
 }
 
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
-const LEVELS = ["A1", "A2", "B1", "B2", "C1"];
+const LEVELS = ["LVL_1", "LVL_2", "LVL_3", "LVL_4"];
 
 function extractDriveId(url?: string): string | null {
   if (!url) return null;
@@ -78,9 +107,16 @@ export default function FuragoApp({
   // Navigation & Views: "home" | "reading" | "words"
   const [activeView, setActiveView] = useState<"home" | "reading" | "words">("home");
 
+  // i18n States
+  const [appLang, setAppLang] = useState<AppLanguage>("ja");
+  const t = getTranslation(appLang);
+  const [showTranslation, setShowTranslation] = useState<Record<number, boolean>>({});
+  const [translatedQuizIds, setTranslatedQuizIds] = useState<Record<string, boolean>>({});
+
+
   // Articles & Filters
   const [articles, setArticles] = useState<Article[]>(initialArticles || []);
-  const [globalLevel, setGlobalLevel] = useState<string>("A1");
+  const [globalLevel, setGlobalLevel] = useState<string>("LVL_1");
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [filterModalType, setFilterModalType] = useState<"level" | "category" | null>(null);
@@ -138,8 +174,7 @@ export default function FuragoApp({
   const [leadStep, setLeadStep] = useState<1 | 2 | 3>(1);
   const [leadEmail, setLeadEmail] = useState<string>("");
   const [leadFirstName, setLeadFirstName] = useState<string>("");
-  const [leadGender, setLeadGender] = useState<string>("");
-  const [leadLevel, setLeadLevel] = useState<string>("A1");
+  const [leadLevel, setLeadLevel] = useState<string>("LVL_1");
   const [leadCategories, setLeadCategories] = useState<string[]>([]);
   const [leadSubmitting, setLeadSubmitting] = useState<boolean>(false);
   const [leadCheckingEmail, setLeadCheckingEmail] = useState<boolean>(false);
@@ -185,7 +220,7 @@ export default function FuragoApp({
     // Extract categories from initialArticles
     const initCats = new Set<string>();
     (initialArticles || []).forEach((a) => {
-      if (a.category) initCats.add(a.category.trim());
+      if (a.category) initCats.add((typeof a.category === "string" ? a.category : (a.category?.ja || "")).trim());
     });
     const catArray = Array.from(initCats);
     setAllCategories(catArray);
@@ -207,7 +242,7 @@ export default function FuragoApp({
           setArticles(valid);
           const freshCats = new Set<string>();
           valid.forEach((a: Article) => {
-            if (a.category) freshCats.add(a.category.trim());
+            if (a.category) freshCats.add((typeof a.category === "string" ? a.category : (a.category?.ja || "")).trim());
           });
           const freshArr = Array.from(freshCats);
           setAllCategories(freshArr);
@@ -293,21 +328,26 @@ export default function FuragoApp({
   }, []);
 
   // Build TTS sentence queue when article or level changes
-  const buildQueueForText = useCallback((text: string) => {
+  const buildQueueForText = useCallback((paragraphs: Paragraph[]) => {
     const q: TtsQueueItem[] = [];
     let currentIndex = 0;
     const regex = /[^.!?\n]+[.!?\n]*\s*/g;
     let match: RegExpExecArray | null;
-    while ((match = regex.exec(text)) !== null) {
-      if (match[0].trim().length > 0) {
-        q.push({
-          text: match[0],
-          start: currentIndex,
-          length: match[0].length,
-        });
+    paragraphs.forEach((p) => {
+      const text = p.fr;
+      let offset = currentIndex;
+      while ((match = regex.exec(text)) !== null) {
+        if (match[0].trim().length > 0) {
+          q.push({
+            text: match[0],
+            start: offset + match.index,
+            length: match[0].length,
+          });
+        }
       }
-      currentIndex += match[0].length;
-    }
+      currentIndex += text.length + 1;
+    });
+
     ttsQueueRef.current = q;
     setTtsQueue(q);
     queueIndexRef.current = 0;
@@ -404,7 +444,7 @@ export default function FuragoApp({
     } else {
       // Play or Resume
       if (ttsQueueRef.current.length === 0) {
-        buildQueueForText(levelData.content);
+        buildQueueForText(levelData.paragraphs);
       }
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
@@ -426,7 +466,7 @@ export default function FuragoApp({
       window.speechSynthesis.cancel();
     }
     if (ttsQueueRef.current.length === 0) {
-      buildQueueForText(levelData.content);
+      buildQueueForText(levelData.paragraphs);
     }
     queueIndexRef.current = 0;
     setQueueIndex(0);
@@ -485,7 +525,7 @@ export default function FuragoApp({
     setSelectedAnswer(null);
     const levelData = article.levels[globalLevel];
     if (levelData) {
-      buildQueueForText(levelData.content);
+      buildQueueForText(levelData.paragraphs);
     }
     setActiveView("reading");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -602,7 +642,7 @@ export default function FuragoApp({
         w.fr.toLowerCase() === dictData.mot.toLowerCase() && w.listId === listId
     );
     if (exists) {
-      showToast("すでにリストにあります");
+      showToast(t.toasts.alreadyInList);
       return;
     }
 
@@ -622,7 +662,7 @@ export default function FuragoApp({
     const updated = [...savedWords, newWord];
     setSavedWords(updated);
     localStorage.setItem("furago_words", JSON.stringify(updated));
-    showToast("保存しました !");
+    showToast(t.toasts.saved);
   };
 
   // Create new word list
@@ -638,7 +678,7 @@ export default function FuragoApp({
     localStorage.setItem("furago_lists", JSON.stringify(updated));
     setNewListName("");
     setNewListModalOpen(false);
-    showToast("リストを作成しました");
+    showToast(t.toasts.listCreated);
   };
 
   // Delete saved word
@@ -648,7 +688,7 @@ export default function FuragoApp({
     );
     setSavedWords(updated);
     localStorage.setItem("furago_words", JSON.stringify(updated));
-    showToast("削除しました");
+    showToast(t.toasts.deleted);
   };
 
   // Liste des catégories proposées à l'inscription (issues des articles + thèmes principaux)
@@ -716,8 +756,8 @@ export default function FuragoApp({
         if (data && data.status === "already_exists") {
           rememberRegisteredEmail(normalizedEmail);
           setLeadStep(1);
-          setLeadError("このメールアドレスは既に登録されています。");
-          showToast("このメールアドレスは既に登録されています。");
+          setLeadError(t.toasts.emailRegistered);
+          showToast(t.toasts.emailRegistered);
         }
       })
       .catch(() => {});
@@ -732,7 +772,7 @@ export default function FuragoApp({
 
     if (leadEmail.trim()) {
       if (isEmailLocallyRegistered(leadEmail)) {
-        showToast("このメールアドレスは既に登録されています。");
+        showToast(t.toasts.emailRegistered);
         return;
       }
       // Si l'utilisateur a déjà tapé son email dans la barre du haut, on lance la vérif en tâche de fond dès l'ouverture !
@@ -754,15 +794,15 @@ export default function FuragoApp({
       "https://script.google.com/macros/s/AKfycbxUb-hUABm9TodggnQgnxrXjhmFzhxQxo-7beGqTdTLAlkI_kdEjQUXGeLMrq9Lhvg1QQ/exec";
 
     if (leadStep === 1) {
-      if (!leadFirstName.trim() || !leadEmail.trim() || !leadGender) {
-        setLeadError("すべての項目を入力・選択してください。");
+      if (!leadFirstName.trim() || !leadEmail.trim()) {
+        setLeadError(t.toasts.enterAllFields);
         return;
       }
 
       const normalizedEmail = leadEmail.trim().toLowerCase();
       if (isEmailLocallyRegistered(normalizedEmail)) {
-        setLeadError("このメールアドレスは既に登録されています。");
-        showToast("このメールアドレスは既に登録されています。");
+        setLeadError(t.toasts.emailRegistered);
+        showToast(t.toasts.emailRegistered);
         return;
       }
 
@@ -779,7 +819,7 @@ export default function FuragoApp({
     }
 
     if (leadCategories.length === 0) {
-      setLeadError("興味のあるカテゴリーを1つ以上選んでください。");
+      setLeadError(t.toasts.selectCategory);
       return;
     }
 
@@ -788,8 +828,8 @@ export default function FuragoApp({
 
     if (isEmailLocallyRegistered(email)) {
       setLeadStep(1);
-      setLeadError("このメールアドレスは既に登録されています。");
-      showToast("このメールアドレスは既に登録されています。");
+      setLeadError(t.toasts.emailRegistered);
+      showToast(t.toasts.emailRegistered);
       return;
     }
 
@@ -797,7 +837,7 @@ export default function FuragoApp({
       email,
       name: leadFirstName.trim(),
       firstName: leadFirstName.trim(),
-      gender: leadGender,
+      gender: "Not specified",
       level: leadLevel,
       categories: leadCategories,
       source: "FuragoWeb",
@@ -809,7 +849,7 @@ export default function FuragoApp({
     setLeadSubmitting(false);
     setLeadModalOpen(false);
     setShowLeadBar(false);
-    showToast("ご登録ありがとうございます！確認メールを送信しました。");
+    showToast(t.toasts.registrationSuccess);
 
     // Envoi en tâche de fond vers Google Sheets + déclenchement de l'email de bienvenue
     if (scriptUrl) {
@@ -826,7 +866,7 @@ export default function FuragoApp({
             data &&
             (data.status === "already_exists" || data.status === "updated")
           ) {
-            showToast("このメールアドレスは既に登録されています。");
+            showToast(t.toasts.emailRegistered);
           }
         })
         .catch((err) => {
@@ -837,7 +877,7 @@ export default function FuragoApp({
 
   // Filtered articles for Home view
   const filteredArticles = articles.filter((article) => {
-    const cat = (article.category || "").trim();
+    const cat = (typeof article.category === "string" ? article.category : article.category?.ja || "").trim();
     if (selectedCategories.length > 0 && cat && !selectedCategories.includes(cat)) {
       return false;
     }
@@ -846,76 +886,95 @@ export default function FuragoApp({
   });
 
   // Render interactive French paragraph with clickable words and TTS highlight
-  const renderInteractiveContent = (text: string) => {
-    if (!text) return null;
-    const paragraphs = text.split("\n");
+  const renderInteractiveContent = (paragraphs: Paragraph[]) => {
     let globalOffset = 0;
+    const allElements: React.ReactNode[] = [];
 
-    return paragraphs.map((pText, pIdx) => {
-      const pStart = globalOffset;
-      globalOffset += pText.length + 1;
+    const sentenceItem = ttsQueue[queueIndex];
+    let sentenceStart = -1;
+    let sentenceEnd = -1;
+    if (sentenceItem) {
+      sentenceStart = sentenceItem.start;
+      sentenceEnd = sentenceItem.start + sentenceItem.length;
+    }
 
-      if (pText.trim() === "") return null;
+    paragraphs.forEach((p, pIdx) => {
+      const text = p.fr;
+      const elements: React.ReactNode[] = [];
+      const tokenRegex = /([a-zA-ZÀ-ÿœæŒÆ]+(?:['’][a-zA-ZÀ-ÿœæŒÆ]+)?)|([^a-zA-ZÀ-ÿœæŒÆ]+)/g;
+      let match;
 
-      // Tokenize paragraph into words and non-word separators while preserving character offsets
-      const tokens: { text: string; isWord: boolean; start: number; end: number }[] = [];
-      const tokenRegex = /([a-zA-ZÀ-ÿœŒæÆ]+(?:['’][a-zA-ZÀ-ÿœŒæÆ]+)?)|([^a-zA-ZÀ-ÿœŒæÆ]+)/g;
-      let match: RegExpExecArray | null;
-      while ((match = tokenRegex.exec(pText)) !== null) {
-        const tStart = pStart + match.index;
-        const tEnd = tStart + match[0].length;
-        tokens.push({
-          text: match[0],
-          isWord: Boolean(match[1]),
-          start: tStart,
-          end: tEnd,
-        });
+      while ((match = tokenRegex.exec(text)) !== null) {
+        const token = match[0];
+        const startIdx = globalOffset;
+        const endIdx = globalOffset + token.length;
+
+        const isWord = /[a-zA-ZÀ-ÿœæŒÆ]/.test(token);
+        let isHighlighted = false;
+        let isDimmed = false;
+
+        if (sentenceStart !== -1 && sentenceEnd !== -1) {
+          if (startIdx >= sentenceStart && startIdx < sentenceEnd) {
+            isHighlighted = true;
+          } else {
+            isDimmed = true;
+          }
+        }
+
+        if (isWord) {
+          elements.push(
+            <span
+              key={startIdx}
+              onClick={(e) => handleWordClick(e, token, text)}
+              style={{
+                cursor: "pointer",
+                transition: "all 0.15s",
+                color: isHighlighted ? "var(--primary)" : isDimmed ? "var(--text-muted)" : "inherit",
+                opacity: isDimmed ? 0.6 : 1,
+                backgroundColor:
+                  isHighlighted &&
+                  highlightRange.length > 0 &&
+                  startIdx >= sentenceStart + highlightRange.start &&
+                  startIdx < sentenceStart + highlightRange.start + highlightRange.length
+                    ? "rgba(0, 122, 255, 0.15)"
+                    : "transparent",
+                borderRadius: "4px",
+              }}
+              className="hover-word"
+            >
+              {token}
+            </span>
+          );
+        } else {
+          elements.push(
+            <span
+              key={startIdx}
+              style={{
+                color: isHighlighted ? "inherit" : isDimmed ? "var(--text-muted)" : "inherit",
+                opacity: isDimmed ? 0.6 : 1,
+              }}
+            >
+              {token}
+            </span>
+          );
+        }
+
+        globalOffset += token.length;
       }
-
-      const hlStart = highlightRange.start;
-      const hlEnd =
-        highlightRange.start >= 0
-          ? highlightRange.start + highlightRange.length
-          : -1;
-
-      return (
-        <p key={pIdx} lang="fr">
-          {tokens.map((tok, tIdx) => {
-            const isHighlighted =
-              hlStart >= 0 && tok.start < hlEnd && tok.end > hlStart;
-
-            if (!tok.isWord) {
-              return (
-                <span
-                  key={tIdx}
-                  className={isHighlighted ? "tts-highlight" : undefined}
-                >
-                  {tok.text}
-                </span>
-              );
-            }
-
-            const isSelectedWord =
-              dictOpen &&
-              dictData &&
-              dictData.originalWord.toLowerCase() === tok.text.toLowerCase();
-
-            return (
-              <span
-                key={tIdx}
-                lang="fr"
-                onClick={(e) => handleWordClick(e, tok.text, pText)}
-                className={`tap-word ${isHighlighted ? "tts-highlight" : ""} ${
-                  isSelectedWord ? "active-word" : ""
-                }`}
-              >
-                {tok.text}
-              </span>
-            );
-          })}
-        </p>
+      
+      const transText = appLang === 'ja' ? p.ja : p.en;
+      allElements.push(
+        <div key={p.id || pIdx} style={{ marginBottom: "1.2rem", position: "relative" }}>
+          <p lang="fr" style={{ margin: 0 }}>
+             {elements}
+          </p>
+        </div>
       );
+      
+      globalOffset += 1;
     });
+    
+    return allElements;
   };
 
   const currentLevelData =
@@ -949,32 +1008,33 @@ export default function FuragoApp({
 
       {/* Top Bar - Capture d'emails (Lead Generation) */}
       {showLeadBar && (
-        <div className="lead-bar">
-          <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
-            新着記事・先行案内
+        <div className="lead-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--primary)', color: 'white', padding: '10px 16px', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 700, whiteSpace: "nowrap", fontSize: '0.95rem' }}>
+            {t.nav.leadBarText}
           </span>
-          <form className="lead-bar-form" onSubmit={handleOpenLeadModal}>
+          <form className="lead-bar-form" onSubmit={(e) => { e.preventDefault(); handleOpenLeadModal(e); }} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <input
               type="email"
               value={leadEmail}
               onChange={(e) => setLeadEmail(e.target.value)}
-              placeholder="メールアドレス"
+              placeholder="e.g. taro@furago.com"
               className="lead-bar-input"
+              style={{ padding: '6px 12px', borderRadius: '16px', border: 'none', outline: 'none', fontSize: '0.85rem' }}
             />
-            <button type="submit" className="lead-bar-btn">
-              登録
+            <button type="submit" className="lead-bar-btn" style={{ background: 'white', color: 'var(--primary)', border: 'none', borderRadius: '16px', padding: '6px 12px', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem' }}>
+              {t.nav.leadBarBtn}
             </button>
             <button
               type="button"
               onClick={() => setShowLeadBar(false)}
-              aria-label="閉じる"
+              aria-label="Close"
               style={{
                 background: "transparent",
                 border: "none",
                 color: "rgba(255,255,255,0.8)",
                 cursor: "pointer",
                 padding: "2px 4px",
-                fontSize: "1rem",
+                fontSize: "1.2rem",
                 lineHeight: 1,
               }}
             >
@@ -985,7 +1045,7 @@ export default function FuragoApp({
       )}
 
       {/* App Header */}
-      <header className="app-header">
+      <header className="app-header" style={{ position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', background: 'var(--surface)', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
         {activeView === "reading" && (
           <button
             className="back-btn"
@@ -994,31 +1054,62 @@ export default function FuragoApp({
               setDictOpen(false);
               setActiveView("home");
             }}
-            aria-label="戻る"
+            aria-label="Back"
+            style={{ padding: '8px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
-            <svg
-              width="26"
-              height="26"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6"></polyline>
             </svg>
           </button>
         )}
-        <h1>Furago</h1>
-        {activeView === "reading" && (
-          <button
-            className="header-level-btn"
-            onClick={() => setFilterModalType("level")}
-          >
-            {globalLevel} ▾
-          </button>
-        )}
+        <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0', color: 'var(--primary)', letterSpacing: '-0.5px', marginLeft: activeView === 'reading' ? '8px' : '0' }}>Furago</h1>
+        
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {activeView === "reading" && (
+            <button
+                className="header-level-btn"
+                onClick={() => setFilterModalType("level")}
+                style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '16px', padding: '4px 10px', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', color: 'var(--text-main)' }}
+            >
+                {t.levels[globalLevel as keyof typeof t.levels] || globalLevel} ▾
+            </button>
+            )}
+            
+            <div style={{ display: 'flex', background: 'var(--bg)', borderRadius: '20px', padding: '2px', border: '1px solid var(--border)' }}>
+              <button 
+                onClick={() => setAppLang("ja")}
+                style={{
+                  background: appLang === 'ja' ? 'var(--primary)' : 'transparent',
+                  color: appLang === 'ja' ? 'white' : 'var(--text-muted)',
+                  border: 'none',
+                  borderRadius: '18px',
+                  padding: '4px 8px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                🇯🇵 JP
+              </button>
+              <button 
+                onClick={() => setAppLang("en")}
+                style={{
+                  background: appLang === 'en' ? 'var(--primary)' : 'transparent',
+                  color: appLang === 'en' ? 'white' : 'var(--text-muted)',
+                  border: 'none',
+                  borderRadius: '18px',
+                  padding: '4px 8px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                🇬🇧 EN
+              </button>
+            </div>
+        </div>
       </header>
 
       {/* VIEW 1: HOME (記事一覧) */}
@@ -1029,7 +1120,7 @@ export default function FuragoApp({
               className="filter-btn"
               onClick={() => setFilterModalType("level")}
             >
-              レベル {globalLevel}
+              {t.nav.level} : {t.levels[globalLevel as keyof typeof t.levels] || globalLevel}
             </button>
             <button
               className="filter-btn"
@@ -1037,8 +1128,8 @@ export default function FuragoApp({
             >
               {selectedCategories.length === allCategories.length ||
               selectedCategories.length === 0
-                ? "カテゴリー"
-                : `カテゴリー (${selectedCategories.length})`}
+                ? t.nav.category
+                : `${t.nav.category} (${selectedCategories.length})`}
             </button>
           </div>
 
@@ -1050,7 +1141,7 @@ export default function FuragoApp({
                 color: "var(--text-muted)",
               }}
             >
-              条件に一致する記事は見つかりませんでした。
+              {appLang === "ja" ? "条件に一致する記事は見つかりませんでした。" : "No articles found matching the criteria."}
             </p>
           ) : (
             <ul className="article-list">
@@ -1074,7 +1165,7 @@ export default function FuragoApp({
                       <div className="article-image-container">
                         <img
                           src={imgUrl}
-                          alt={displayTitle || ""}
+                          alt={typeof displayTitle === "string" ? displayTitle : displayTitle?.fr || ""}
                           loading="lazy"
                           referrerPolicy="no-referrer"
                           onError={(e) => {
@@ -1090,7 +1181,7 @@ export default function FuragoApp({
                       </div>
                     )}
                     <div className="article-card-content">
-                      <h3 lang="fr">{displayTitle}</h3>
+                      <h3 lang="fr">{typeof displayTitle === "string" ? displayTitle : displayTitle?.fr}</h3>
                       <p
                         style={{
                           display: "flex",
@@ -1106,9 +1197,10 @@ export default function FuragoApp({
                           style={{
                             background: "var(--bg)",
                             color: "var(--text-muted)",
+                            textTransform: "capitalize"
                           }}
                         >
-                          {article.category || "一般"}
+                          {typeof article.category === "string" ? article.category : article.category?.[appLang] || "General"}
                         </span>
                         {dateFormatted && (
                           <span
@@ -1138,7 +1230,7 @@ export default function FuragoApp({
             <div className="article-hero">
               <img
                 src={formatDriveUrl(currentArticle.imageUrl)}
-                alt={currentLevelData.title}
+                alt={typeof currentLevelData.title === "string" ? currentLevelData.title : currentLevelData.title?.fr}
                 referrerPolicy="no-referrer"
                 onError={(e) => {
                   const id = extractDriveId(currentArticle.imageUrl);
@@ -1154,7 +1246,7 @@ export default function FuragoApp({
           )}
 
           <div className="article-header">
-            <h2 lang="fr">{currentLevelData.title}</h2>
+            <h2 lang="fr">{typeof currentLevelData.title === "string" ? currentLevelData.title : (currentLevelData.title as any)?.fr}</h2>
             <div
               style={{
                 display: "flex",
@@ -1174,7 +1266,7 @@ export default function FuragoApp({
                   fontSize: "0.85rem",
                 }}
               >
-                {currentArticle.category || "一般"}
+                {typeof currentArticle.category === "string" ? currentArticle.category : (currentArticle.category as any)?.[appLang] || "General"}
               </span>
               {currentArticle.date && (
                 <span
@@ -1195,18 +1287,18 @@ export default function FuragoApp({
                 marginTop: "10px",
               }}
             >
-              💡 単語をタップ（またはクリック）すると日本語の意味と文脈翻訳が表示されます
+              {t.reading.tapHint}
             </p>
           </div>
 
           <div className="article-content" lang="fr">
-            {renderInteractiveContent(currentLevelData.content)}
+            {renderInteractiveContent(currentLevelData.paragraphs)}
           </div>
 
           {/* Comprehension Quiz */}
           {currentLevelData.quiz && currentLevelData.quiz.length > 0 && (
             <div className="quiz-section">
-              <h3>🧠 理解度クイズ</h3>
+              <h3>🧠 {t.reading.quiz}</h3>
               {quizIndex >= currentLevelData.quiz.length ? (
                 <div className="quiz-card fade-in" style={{ textAlign: "center" }}>
                   <h4
@@ -1216,7 +1308,7 @@ export default function FuragoApp({
                       color: "var(--primary)",
                     }}
                   >
-                    スコア: {quizScore} / {currentLevelData.quiz.length}
+                    {t.quiz.score}: {quizScore} {t.quiz.outOf} {currentLevelData.quiz.length}
                   </h4>
                   <p
                     style={{
@@ -1226,10 +1318,10 @@ export default function FuragoApp({
                     }}
                   >
                     {quizScore === currentLevelData.quiz.length
-                      ? "素晴らしい！🎉"
+                      ? "Excellent! 🎉"
                       : quizScore >= currentLevelData.quiz.length / 2
-                        ? "よくできました！👏"
-                        : "もう一度挑戦しよう！💪"}
+                        ? "Good job! 👏"
+                        : "Try again! 💪"}
                   </p>
                   <button
                     onClick={() => {
@@ -1247,33 +1339,57 @@ export default function FuragoApp({
                       cursor: "pointer",
                     }}
                   >
-                    もう一度やる
+                    {t.quiz.finish} / {appLang === 'ja' ? 'もう一度やる' : 'Try Again'}
                   </button>
                 </div>
               ) : (
                 (() => {
                   const q = currentLevelData.quiz[quizIndex];
-                  const correctKey = q.answer.trim().toUpperCase();
+                  if (!q.choices && (q as any).options) {
+                    return null;
+                  }
+                  
+                  const qId = q.id;
+                  const isQTranslated = !!translatedQuizIds[qId];
+
                   return (
                     <div className="quiz-card fade-in" key={quizIndex}>
-                      <p
-                        style={{
-                          color: "var(--text-muted)",
-                          fontSize: "0.88rem",
-                          marginBottom: "8px",
-                          fontWeight: 700,
-                        }}
-                      >
-                        質問 {quizIndex + 1} / {currentLevelData.quiz.length}
-                      </p>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <p
+                            style={{
+                              color: "var(--text-muted)",
+                              fontSize: "0.88rem",
+                              fontWeight: 700,
+                              margin: 0
+                            }}
+                          >
+                            Q {quizIndex + 1} / {currentLevelData.quiz.length}
+                          </p>
+                          <button
+                            onClick={() => setTranslatedQuizIds(prev => ({...prev, [qId]: !prev[qId]}))}
+                            style={{
+                                background: "none", border: "none", color: "var(--primary)",
+                                fontSize: "0.75rem", cursor: "pointer", fontWeight: 700
+                            }}
+                          >
+                            {isQTranslated ? t.reading.hideTranslation : t.reading.translateQuestion}
+                          </button>
+                      </div>
+                      
                       <p className="quiz-question" lang="fr">
-                        {q.text}
+                        {q.question.fr}
                       </p>
+                      {isQTranslated && (
+                          <p className="quiz-question" style={{ fontSize: '0.95rem', color: 'var(--text-muted)', marginTop: '-10px', marginBottom: '20px' }}>
+                              {appLang === 'ja' ? q.question.ja : q.question.en}
+                          </p>
+                      )}
+                      
                       <div>
-                        {["A", "B", "C", "D"].map((key) => {
-                          if (!q.options[key]) return null;
+                        {q.choices?.map((choice, cIdx) => {
+                          const key = choice.id;
                           const isChosen = selectedAnswer === key;
-                          const isCorrectOption = key === correctKey;
+                          const isCorrectOption = choice.isCorrect;
 
                           let statusClass = "";
                           if (selectedAnswer !== null) {
@@ -1286,10 +1402,9 @@ export default function FuragoApp({
                               key={key}
                               disabled={selectedAnswer !== null}
                               className={`quiz-option ${statusClass}`}
-                              lang="fr"
                               onClick={() => {
                                 setSelectedAnswer(key);
-                                if (key === correctKey) {
+                                if (isCorrectOption) {
                                   setQuizScore((s) => s + 1);
                                 }
                                 setTimeout(() => {
@@ -1297,8 +1412,14 @@ export default function FuragoApp({
                                   setQuizIndex((idx) => idx + 1);
                                 }, 1700);
                               }}
+                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
                             >
-                              {key}. {q.options[key]}
+                              <span lang="fr">{cIdx + 1}. {choice.text.fr}</span>
+                              {isQTranslated && (
+                                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                      {appLang === 'ja' ? choice.text.ja : choice.text.en}
+                                  </span>
+                              )}
                             </button>
                           );
                         })}
@@ -1306,14 +1427,14 @@ export default function FuragoApp({
                       {selectedAnswer !== null && (
                         <div
                           className={`quiz-feedback-text ${
-                            selectedAnswer === correctKey
+                            q.choices?.find(c => c.id === selectedAnswer)?.isCorrect
                               ? "text-correct"
                               : "text-incorrect"
                           }`}
                         >
-                          {selectedAnswer === correctKey
-                            ? "⭕ 正解！"
-                            : "❌ 不正解..."}
+                          {q.choices?.find(c => c.id === selectedAnswer)?.isCorrect
+                            ? `⭕ ${t.quiz.correct}`
+                            : `❌ ${t.quiz.wrong}`}
                         </div>
                       )}
                     </div>
@@ -1339,7 +1460,7 @@ export default function FuragoApp({
                 }}
               >
                 <h2 style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--primary)" }}>
-                  単語帳
+                  {t.words.title}
                 </h2>
                 <button
                   onClick={() => setNewListModalOpen(true)}
@@ -1354,7 +1475,7 @@ export default function FuragoApp({
                     cursor: "pointer",
                   }}
                 >
-                  + 新しいリスト
+                  + {t.words.newList}
                 </button>
               </div>
 
@@ -1404,10 +1525,10 @@ export default function FuragoApp({
                         </div>
                         <div>
                           <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>
-                            {list.name}
+                            {list.name === 'デフォルト' ? t.words.defaultList : list.name}
                           </h3>
                           <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                            {count} 単語
+                            {count} {t.words.wordCount}
                           </span>
                         </div>
                       </div>
@@ -1463,7 +1584,11 @@ export default function FuragoApp({
                     margin: 0,
                   }}
                 >
-                  {wordLists.find((l) => l.id === currentListId)?.name || "リスト"}
+                  {(() => {
+                    const ln = wordLists.find((l) => l.id === currentListId)?.name;
+                    if (ln === 'デフォルト') return t.words.defaultList;
+                    return ln || t.words.list;
+                  })()}
                 </h2>
               </div>
 
@@ -1483,9 +1608,12 @@ export default function FuragoApp({
                       }}
                     >
                       <p>
-                        このリストは空です。
-                        <br />
-                        記事内でフランス語の単語をタップして追加しましょう！
+                        {t.words.emptyList.split('\n').map((line, i) => (
+                          <React.Fragment key={i}>
+                            {line}
+                            {i === 0 && <br />}
+                          </React.Fragment>
+                        ))}
                       </p>
                     </div>
                   );
@@ -1525,7 +1653,7 @@ export default function FuragoApp({
                             {word.nature}
                           </span>
                         )}
-                        <h3
+                          <h3
                           lang="fr"
                           style={{
                             color: "var(--primary)",
@@ -1545,7 +1673,7 @@ export default function FuragoApp({
                                   fontWeight: 400,
                                 }}
                               >
-                                (原形: {word.fr})
+                                ({t.words.lemmaPrefix} {word.fr})
                               </span>
                             </>
                           ) : (
@@ -1557,7 +1685,7 @@ export default function FuragoApp({
                       <div style={{ display: "flex", gap: "8px" }}>
                         <button
                           onClick={() => speakWord(word.fr)}
-                          title="発音を聞く"
+                          title={t.words.listenPronunciation}
                           style={{
                             background: "var(--bg)",
                             border: "1px solid var(--border)",
@@ -1583,7 +1711,7 @@ export default function FuragoApp({
                         </button>
                         <button
                           onClick={() => handleDeleteWord(word.fr, word.listId || "default")}
-                          title="削除"
+                          title={t.words.delete}
                           style={{
                             background: "var(--bg)",
                             border: "1px solid var(--border)",
@@ -1618,7 +1746,7 @@ export default function FuragoApp({
                       </div>
                       {word.phraseOriginale && word.traductionPhrase && (
                         <div className="dict-context-row" style={{ marginTop: "6px" }}>
-                          <span className="dict-context-label">文脈</span>
+                          <span className="dict-context-label">{t.dict.context}</span>
                           <span>{word.traductionPhrase}</span>
                         </div>
                       )}
@@ -1663,7 +1791,7 @@ export default function FuragoApp({
             <div className="dict-buttons">
               <button
                 className="dict-save-btn"
-                title="単語帳に保存"
+                title={t.dict.saveToList}
                 onClick={() => {
                   if (!dictData) return;
                   if (wordLists.length <= 1) {
@@ -1689,7 +1817,7 @@ export default function FuragoApp({
               </button>
               <button
                 className="dict-audio-btn"
-                title="発音を聞く"
+                title={t.words.listenPronunciation}
                 onClick={() => {
                   if (dictData) speakWord(dictData.mot);
                 }}
@@ -1709,7 +1837,7 @@ export default function FuragoApp({
 
           {dictLoading || !dictData ? (
             <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", padding: "4px 0" }}>
-              検索中...
+              {t.dict.loading}
             </div>
           ) : (
             <div>
@@ -1718,13 +1846,13 @@ export default function FuragoApp({
               )}
               {dictData.traductionPhrase ? (
                 <div className="dict-context-row">
-                  <span className="dict-context-label">文脈</span>
+                  <span className="dict-context-label">{t.dict.context}</span>
                   <span>{dictData.traductionPhrase}</span>
                 </div>
               ) : (
                 !dictData.conciseDef && (
                   <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                    定義が見つかりませんでした
+                    {t.dict.noDef}
                   </div>
                 )
               )}
@@ -1745,7 +1873,7 @@ export default function FuragoApp({
         >
           <button
             onClick={handleRestartAudio}
-            title="最初から再生"
+            title={t.reading.restartAudio}
             style={{
               background: "none",
               border: "none",
@@ -1771,7 +1899,7 @@ export default function FuragoApp({
 
           <button
             onClick={handlePrevSentence}
-            title="前の文"
+            title={t.reading.prevSentence}
             style={{
               background: "none",
               border: "none",
@@ -1797,7 +1925,7 @@ export default function FuragoApp({
 
           <button
             onClick={handlePlayPause}
-            title={isPlaying && !isPaused ? "一時停止" : "再生"}
+            title={t.reading.playPause}
             style={{
               background:
                 isPlaying && !isPaused
@@ -1831,7 +1959,7 @@ export default function FuragoApp({
 
           <button
             onClick={handleNextSentence}
-            title="次の文"
+            title={t.reading.nextSentence}
             style={{
               background: "none",
               border: "none",
@@ -1877,10 +2005,10 @@ export default function FuragoApp({
               }
             }}
           >
-            <option value={1}>速度 : 標準 (1x)</option>
-            <option value={0.8}>速度 : 遅い (0.8x)</option>
-            <option value={0.6}>速度 : とても遅い (0.6x)</option>
-            <option value={0.4}>速度 : 最も遅い (0.4x)</option>
+            <option value={1}>{appLang === 'ja' ? '速度 : 標準 (1x)' : 'Speed: Normal (1x)'}</option>
+            <option value={0.8}>{appLang === 'ja' ? '速度 : 遅い (0.8x)' : 'Speed: Slow (0.8x)'}</option>
+            <option value={0.6}>{appLang === 'ja' ? '速度 : とても遅い (0.6x)' : 'Speed: Very Slow (0.6x)'}</option>
+            <option value={0.4}>{appLang === 'ja' ? '速度 : 最も遅い (0.4x)' : 'Speed: Slowest (0.4x)'}</option>
           </select>
 
           <select
@@ -1899,7 +2027,7 @@ export default function FuragoApp({
             }}
           >
             {frVoices.length === 0 ? (
-              <option value={0}>フランス語音声 (標準)</option>
+              <option value={0}>{appLang === 'ja' ? 'フランス語音声 (標準)' : 'French Voice (Default)'}</option>
             ) : (
               frVoices.map((v, i) => (
                 <option key={i} value={i}>
@@ -1933,7 +2061,7 @@ export default function FuragoApp({
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
             </svg>
-            記事
+            {t.nav.home}
           </button>
           <button
             className={`nav-item ${activeView === "words" ? "active" : ""}`}
@@ -1955,7 +2083,7 @@ export default function FuragoApp({
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
               <polyline points="22,6 12,13 2,6"></polyline>
             </svg>
-            単語帳
+            {t.nav.words}
           </button>
         </nav>
       )}
@@ -1984,7 +2112,7 @@ export default function FuragoApp({
                 marginBottom: "18px",
               }}
             >
-              {filterModalType === "level" ? "レベルを選ぶ" : "カテゴリーを選ぶ"}
+              {filterModalType === "level" ? t.reading.selectLevel : t.reading.selectCategory}
             </h3>
 
             <div
@@ -2011,12 +2139,12 @@ export default function FuragoApp({
                         stopAudio();
                         setGlobalLevel(lvl);
                         if (currentArticle && currentArticle.levels[lvl]) {
-                          buildQueueForText(currentArticle.levels[lvl].content);
+                          buildQueueForText(currentArticle.levels[lvl].paragraphs);
                         }
                         setFilterModalType(null);
                       }}
                     >
-                      レベル {lvl}
+                      {t.levels[lvl as keyof typeof t.levels] || lvl}
                     </button>
                   ))
                 : allCategories.map((cat) => {
@@ -2043,7 +2171,13 @@ export default function FuragoApp({
                           }
                         }}
                       >
-                        {cat}
+                        {(() => {
+                          if (appLang === 'ja') return cat;
+                          const matchedArticle = articles.find(a => (typeof a.category === 'string' ? a.category : a.category?.ja) === cat);
+                          return matchedArticle && typeof matchedArticle.category !== 'string' && matchedArticle.category[appLang] 
+                            ? matchedArticle.category[appLang] 
+                            : cat;
+                        })()}
                       </button>
                     );
                   })}
@@ -2071,7 +2205,7 @@ export default function FuragoApp({
             }}
           >
             <h3 style={{ textAlign: "center", fontSize: "1.15rem", fontWeight: 700, marginBottom: "16px" }}>
-              保存先リストを選択
+              {t.words.selectListToSave}
             </h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               {wordLists.map((list) => {
@@ -2094,9 +2228,11 @@ export default function FuragoApp({
                       fontSize: "0.95rem",
                     }}
                   >
-                    <span style={{ fontWeight: 700 }}>{list.name}</span>
+                    <span style={{ fontWeight: 700 }}>
+                      {list.name === 'デフォルト' ? t.words.defaultList : list.name}
+                    </span>
                     <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                      {count} 単語
+                      {count} {t.words.wordCount}
                     </span>
                   </button>
                 );
@@ -2115,7 +2251,7 @@ export default function FuragoApp({
                 cursor: "pointer",
               }}
             >
-              キャンセル
+              {t.words.cancel}
             </button>
           </div>
         </div>
@@ -2141,7 +2277,7 @@ export default function FuragoApp({
             }}
           >
             <h3 style={{ textAlign: "center", fontSize: "1.1rem", fontWeight: 700, marginBottom: "14px" }}>
-              新しいリストの名前
+              {t.words.newListNameTitle}
             </h3>
             <input
               type="text"
@@ -2149,7 +2285,7 @@ export default function FuragoApp({
               autoFocus
               value={newListName}
               onChange={(e) => setNewListName(e.target.value)}
-              placeholder="例：旅行フレーズ、動詞..."
+              placeholder={t.words.newListPlaceholder}
               style={{
                 width: "100%",
                 padding: "12px",
@@ -2174,7 +2310,7 @@ export default function FuragoApp({
                   cursor: "pointer",
                 }}
               >
-                キャンセル
+                {t.words.cancel}
               </button>
               <button
                 type="submit"
@@ -2189,7 +2325,7 @@ export default function FuragoApp({
                   cursor: "pointer",
                 }}
               >
-                作成
+                {t.words.create}
               </button>
             </div>
           </form>
@@ -2218,7 +2354,7 @@ export default function FuragoApp({
               }}
             >
               <h3 style={{ fontSize: "1.15rem", fontWeight: 800, color: "var(--primary)" }}>
-                Furago ニュースレター登録
+                {t.newsletter.title}
               </h3>
               <button
                 type="button"
@@ -2238,7 +2374,7 @@ export default function FuragoApp({
               </button>
             </div>
 
-            {/* Barre de progression 3 étapes */}
+            {/* Barre de progression 3 etapes */}
             <div style={{ marginBottom: "18px" }}>
               <div
                 style={{
@@ -2250,13 +2386,13 @@ export default function FuragoApp({
                   marginBottom: "6px",
                 }}
               >
-                <span>ステップ {leadStep} / 3</span>
+                <span>Step {leadStep} / 3</span>
                 <span>
                   {leadStep === 1
-                    ? "基本情報"
+                    ? t.newsletter.step1
                     : leadStep === 2
-                      ? "フランス語レベル"
-                      : "興味のあるテーマ"}
+                      ? t.newsletter.step2
+                      : t.newsletter.step3}
                 </span>
               </div>
               <div
@@ -2281,7 +2417,7 @@ export default function FuragoApp({
               </div>
             </div>
 
-            {/* Message d'erreur (ex: Email déjà enregistré) */}
+            {/* Message d'erreur */}
             {leadError && (
               <div
                 style={{
@@ -2300,7 +2436,7 @@ export default function FuragoApp({
               </div>
             )}
 
-            {/* ÉTAPE 1 : Prénom, Email et Sexe (Liste déroulante sans sélection par défaut) */}
+            {/* ETAPE 1 : Prenom, Email */}
             {leadStep === 1 && (
               <div className="fade-in">
                 <label
@@ -2311,7 +2447,7 @@ export default function FuragoApp({
                     marginBottom: "6px",
                   }}
                 >
-                  名前
+                  {t.newsletter.name}
                 </label>
                 <input
                   type="text"
@@ -2322,7 +2458,7 @@ export default function FuragoApp({
                     setLeadFirstName(e.target.value);
                     setLeadError(null);
                   }}
-                  placeholder="例: 太郎 / Taro"
+                  placeholder={appLang === 'ja' ? "例: 太郎 / Taro" : "e.g. Taro"}
                   style={{
                     width: "100%",
                     padding: "11px 12px",
@@ -2343,7 +2479,7 @@ export default function FuragoApp({
                     marginBottom: "6px",
                   }}
                 >
-                  メールアドレス
+                  {t.newsletter.email}
                 </label>
                 <input
                   type="email"
@@ -2361,153 +2497,102 @@ export default function FuragoApp({
                     border: "1px solid var(--border)",
                     background: "var(--bg)",
                     fontSize: "0.95rem",
-                    marginBottom: "14px",
+                    marginBottom: "22px",
                     outline: "none",
                   }}
                 />
 
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "0.84rem",
-                    fontWeight: 700,
-                    marginBottom: "6px",
-                  }}
-                >
-                  性別
-                </label>
-                <select
-                  required
-                  value={leadGender}
-                  onChange={(e) => {
-                    setLeadGender(e.target.value);
-                    setLeadError(null);
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "11px 12px",
-                    borderRadius: "10px",
-                    border: "1px solid var(--border)",
-                    background: "var(--bg)",
-                    color: leadGender ? "var(--text-main)" : "var(--text-muted)",
-                    fontSize: "0.95rem",
-                    fontWeight: leadGender ? 600 : 400,
-                    marginBottom: "22px",
-                    outline: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="" disabled>
-                    選択してください
-                  </option>
-                  <option value="女性">女性</option>
-                  <option value="男性">男性</option>
-                  <option value="回答しない">回答しない</option>
-                </select>
-
-                <button
-                  type="submit"
-                  disabled={
-                    leadCheckingEmail ||
-                    !leadFirstName.trim() ||
-                    !leadEmail.trim() ||
-                    !leadGender
-                  }
-                  style={{
-                    width: "100%",
-                    padding: "13px",
-                    background:
-                      leadCheckingEmail ||
-                      !leadFirstName.trim() ||
-                      !leadEmail.trim() ||
-                      !leadGender
-                        ? "var(--border)"
-                        : "var(--primary)",
-                    color:
-                      leadCheckingEmail ||
-                      !leadFirstName.trim() ||
-                      !leadEmail.trim() ||
-                      !leadGender
-                        ? "var(--text-muted)"
-                        : "white",
-                    border: "none",
-                    borderRadius: "12px",
-                    fontWeight: 800,
-                    fontSize: "0.96rem",
-                    cursor:
-                      leadCheckingEmail ||
-                      !leadFirstName.trim() ||
-                      !leadEmail.trim() ||
-                      !leadGender
-                        ? "not-allowed"
-                        : "pointer",
-                    transition: "all 0.2s ease",
-                  }}
-                >
-                  {leadCheckingEmail ? "確認中..." : "次へ"}
-                </button>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setLeadModalOpen(false)}
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      color: "var(--text-main)",
+                    }}
+                  >
+                    {t.newsletter.cancel}
+                  </button>
+                  <button
+                    type="submit"
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      background: "var(--primary)",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {leadCheckingEmail ? (appLang === 'ja' ? "確認中..." : "Checking...") : "Next"}
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* ÉTAPE 2 : Niveau de français */}
+            {/* ETAPE 2 : Niveau de francais */}
             {leadStep === 2 && (
               <div className="fade-in">
                 <p
                   style={{
-                    fontSize: "0.92rem",
-                    fontWeight: 700,
-                    marginBottom: "12px",
+                    fontSize: "0.95rem",
+                    marginBottom: "14px",
+                    color: "var(--text-main)",
+                    fontWeight: 600,
                   }}
                 >
-                  現在のフランス語レベルを教えてください
+                  {appLang === 'ja' ? '現在のフランス語レベルを教えてください。' : 'What is your current French level?'}
                 </p>
-
                 <div
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
+                    display: "grid",
                     gap: "8px",
                     marginBottom: "22px",
                   }}
                 >
                   {[
-                    { code: "A1", desc: "A1 — 入門・初心者" },
-                    { code: "A2", desc: "A2 — 初級（日常の基礎）" },
-                    { code: "B1", desc: "B1 — 中級（一般的な話題）" },
-                    { code: "B2", desc: "B2 — 中上級（ニュースや議論）" },
-                    { code: "C1", desc: "C1 — 上級（自然な表現）" },
+                    { code: "LVL_1", desc: "Absolute Beginner" },
+                    { code: "LVL_2", desc: "Beginner" },
+                    { code: "LVL_3", desc: "Intermediate" },
+                    { code: "LVL_4", desc: "Advanced" }
                   ].map((item) => (
                     <button
                       key={item.code}
                       type="button"
-                      onClick={() => setLeadLevel(item.code)}
+                      onClick={() => {
+                        setLeadLevel(item.code);
+                        setLeadError(null);
+                      }}
                       style={{
-                        width: "100%",
-                        padding: "11px 14px",
+                        padding: "12px 14px",
                         borderRadius: "12px",
-                        textAlign: "left",
                         border:
                           leadLevel === item.code
                             ? "2px solid var(--primary)"
-                            : "1px solid var(--border)",
+                            : "2px solid var(--border)",
                         background:
                           leadLevel === item.code
                             ? "var(--primary-light)"
-                            : "var(--bg)",
-                        color:
-                          leadLevel === item.code
-                            ? "var(--primary)"
-                            : "var(--text-main)",
-                        fontWeight: 700,
-                        fontSize: "0.92rem",
+                            : "var(--surface)",
+                        textAlign: "left",
                         cursor: "pointer",
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
                       }}
                     >
-                      <span>{item.desc}</span>
-                      {leadLevel === item.code && <span>✓</span>}
+                      <span style={{ fontWeight: 600 }}>
+                        {t.levels[item.code as keyof typeof t.levels]}
+                      </span>
+                      {leadLevel === item.code && <span>✔️</span>}
                     </button>
                   ))}
                 </div>
@@ -2520,63 +2605,61 @@ export default function FuragoApp({
                       flex: 1,
                       padding: "12px",
                       background: "var(--bg)",
-                      color: "var(--text-main)",
                       border: "1px solid var(--border)",
                       borderRadius: "12px",
                       fontWeight: 700,
                       cursor: "pointer",
+                      color: "var(--text-main)",
                     }}
                   >
-                    戻る
+                    Back
                   </button>
                   <button
                     type="submit"
                     style={{
-                      flex: 2,
+                      flex: 1,
                       padding: "12px",
                       background: "var(--primary)",
                       color: "white",
                       border: "none",
                       borderRadius: "12px",
-                      fontWeight: 800,
-                      fontSize: "0.96rem",
+                      fontWeight: 700,
                       cursor: "pointer",
                     }}
                   >
-                    次へ
+                    Next
                   </button>
                 </div>
               </div>
             )}
 
-            {/* ÉTAPE 3 : Catégories préférées (Aucune pré-sélectionnée par défaut -> choix conscient) */}
+            {/* ETAPE 3 : Categories preferees */}
             {leadStep === 3 && (
               <div className="fade-in">
                 <p
                   style={{
-                    fontSize: "0.92rem",
-                    fontWeight: 700,
-                    marginBottom: "6px",
-                  }}
-                >
-                  興味のあるカテゴリーを選んでください
-                </p>
-                <p
-                  style={{
-                    fontSize: "0.8rem",
-                    color: "var(--text-muted)",
+                    fontSize: "0.95rem",
                     marginBottom: "14px",
+                    color: "var(--text-main)",
+                    fontWeight: 600,
                   }}
                 >
-                  1つ以上タップして選択してください（複数選択可）
+                  {appLang === 'ja' ? '興味のあるカテゴリーを選んでください' : 'Select the categories you are interested in'}
+                  <br />
+                  <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 400 }}>
+                    {appLang === 'ja' ? '（1つ以上タップして選択）' : '(Tap to select one or more)'}
+                  </span>
                 </p>
 
                 <div
                   style={{
                     display: "flex",
                     flexWrap: "wrap",
-                    gap: "10px",
-                    marginBottom: "24px",
+                    gap: "8px",
+                    marginBottom: "22px",
+                    maxHeight: "220px",
+                    overflowY: "auto",
+                    paddingBottom: "10px",
                   }}
                 >
                   {newsletterCategoryOptions.map((cat) => {
@@ -2586,6 +2669,7 @@ export default function FuragoApp({
                         key={cat}
                         type="button"
                         onClick={() => {
+                          setLeadError(null);
                           if (isSelected) {
                             setLeadCategories((prev) =>
                               prev.filter((c) => c !== cat)
@@ -2595,20 +2679,21 @@ export default function FuragoApp({
                           }
                         }}
                         style={{
-                          padding: "10px 16px",
-                          borderRadius: "18px",
+                          padding: "8px 14px",
+                          borderRadius: "20px",
                           border: isSelected
                             ? "2px solid var(--primary)"
                             : "1px solid var(--border)",
                           background: isSelected
                             ? "var(--primary-light)"
-                            : "var(--bg)",
+                            : "var(--surface)",
                           color: isSelected
                             ? "var(--primary)"
                             : "var(--text-main)",
-                          fontWeight: 700,
-                          fontSize: "0.9rem",
+                          fontWeight: 600,
+                          fontSize: "0.85rem",
                           cursor: "pointer",
+                          transition: "all 0.2s",
                         }}
                       >
                         {isSelected ? `✓ ${cat}` : cat}
@@ -2625,41 +2710,30 @@ export default function FuragoApp({
                       flex: 1,
                       padding: "12px",
                       background: "var(--bg)",
-                      color: "var(--text-main)",
                       border: "1px solid var(--border)",
                       borderRadius: "12px",
                       fontWeight: 700,
                       cursor: "pointer",
+                      color: "var(--text-main)",
                     }}
                   >
-                    戻る
+                    Back
                   </button>
                   <button
                     type="submit"
-                    disabled={leadSubmitting || leadCategories.length === 0}
+                    disabled={leadSubmitting}
                     style={{
-                      flex: 2,
+                      flex: 1,
                       padding: "12px",
-                      background:
-                        leadSubmitting || leadCategories.length === 0
-                          ? "var(--border)"
-                          : "var(--primary)",
-                      color:
-                        leadSubmitting || leadCategories.length === 0
-                          ? "var(--text-muted)"
-                          : "white",
+                      background: leadSubmitting ? "var(--border)" : "var(--primary)",
+                      color: "white",
                       border: "none",
                       borderRadius: "12px",
-                      fontWeight: 800,
-                      fontSize: "0.96rem",
-                      cursor:
-                        leadSubmitting || leadCategories.length === 0
-                          ? "not-allowed"
-                          : "pointer",
-                      transition: "all 0.2s ease",
+                      fontWeight: 700,
+                      cursor: leadSubmitting ? "not-allowed" : "pointer",
                     }}
                   >
-                    {leadSubmitting ? "送信中..." : "登録を完了する"}
+                    {leadSubmitting ? (appLang === 'ja' ? "送信中..." : "Submitting...") : t.newsletter.submit}
                   </button>
                 </div>
               </div>

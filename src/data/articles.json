@@ -1,0 +1,923 @@
+{
+  "articles": [
+    {
+      "id": "ART_001",
+      "date": "2026-09-29",
+      "category": {
+        "ja": "地理",
+        "en": "Geography"
+      },
+      "imageUrl": "https://drive.google.com/file/d/1cKmPOEMhm1cLDfYLekwVpszeOHM8QctE/view?usp=drive_link",
+      "levels": {
+        "LVL_1": {
+          "title": {
+            "fr": "La frontière de la France",
+            "ja": "フランスの国境",
+            "en": "The border of France"
+          },
+          "paragraphs": [
+            {
+              "id": "p1",
+              "fr": "La France a plusieurs frontières.",
+              "ja": "フランスにはいくつかの国境があります。",
+              "en": "France has several borders."
+            },
+            {
+              "id": "p2",
+              "fr": "La plus grande frontière est avec le Brésil.",
+              "ja": "一番大きな国境はブラジルとのものです。",
+              "en": "The largest border is with Brazil."
+            },
+            {
+              "id": "p3",
+              "fr": "C'est grâce à la Guyane.",
+              "ja": "それはギアナのおかげです。",
+              "en": "It is thanks to Guiana."
+            },
+            {
+              "id": "p4",
+              "fr": "La Guyane est en Amérique du Sud.",
+              "ja": "ギアナは南米にあります。",
+              "en": "Guiana is in South America."
+            },
+            {
+              "id": "p5",
+              "fr": "Mais c'est un territoire français.",
+              "ja": "しかし、それはフランスの領土です。",
+              "en": "But it is a French territory."
+            },
+            {
+              "id": "p6",
+              "fr": "La frontière avec le Brésil fait 730 kilomètres.",
+              "ja": "ブラジルとの国境は730キロメートルです。",
+              "en": "The border with Brazil is 730 kilometers."
+            },
+            {
+              "id": "p7",
+              "fr": "Elle est dans la forêt amazonienne.",
+              "ja": "それはアマゾンの森の中にあります。",
+              "en": "It is in the Amazon rainforest."
+            },
+            {
+              "id": "p8",
+              "fr": "Les habitants de la Guyane utilisent des euros.",
+              "ja": "ギアナの住民はユーロを使います。",
+              "en": "The inhabitants of Guiana use euros."
+            },
+            {
+              "id": "p9",
+              "fr": "Ils sont des citoyens européens.",
+              "ja": "彼らはヨーロッパの市民です。",
+              "en": "They are European citizens."
+            },
+            {
+              "id": "p10",
+              "fr": "L'Union européenne est donc à côté de la jungle.",
+              "ja": "したがって、欧州連合はジャングルの隣にあります。",
+              "en": "So, the European Union is next to the jungle."
+            },
+            {
+              "id": "p11",
+              "fr": "La Guyane a un très grand parc avec des jaguars.",
+              "ja": "ギアナにはジャガーがいるとても大きな公園があります。",
+              "en": "Guiana has a very large park with jaguars."
+            },
+            {
+              "id": "p12",
+              "fr": "La Guyane, c'est la France.",
+              "ja": "ギアナはフランスです。",
+              "en": "Guiana is France."
+            },
+            {
+              "id": "p13",
+              "fr": "Donc, il y a des jaguars en France !",
+              "ja": "だから、フランスにはジャガーがいます！",
+              "en": "So, there are jaguars in France!"
+            }
+          ],
+          "quiz": [
+            {
+              "id": "q1",
+              "question": {
+                "fr": "Quelle est la plus grande frontière ?",
+                "ja": "最も大きな国境はどれですか？",
+                "en": "What is the largest border?"
+              },
+              "choices": [
+                {
+                  "id": "q1_c1",
+                  "text": {
+                    "fr": "Le Brésil",
+                    "ja": "ブラジル",
+                    "en": "Brazil"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q1_c2",
+                  "text": {
+                    "fr": "L'Espagne",
+                    "ja": "スペイン",
+                    "en": "Spain"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q1_c3",
+                  "text": {
+                    "fr": "La Belgique",
+                    "ja": "ベルギー",
+                    "en": "Belgium"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q1_c4",
+                  "text": {
+                    "fr": "L'Italie",
+                    "ja": "イタリア",
+                    "en": "Italy"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            },
+            {
+              "id": "q2",
+              "question": {
+                "fr": "Où est la Guyane ?",
+                "ja": "ギアナはどこにありますか？",
+                "en": "Where is Guiana?"
+              },
+              "choices": [
+                {
+                  "id": "q2_c1",
+                  "text": {
+                    "fr": "En Europe",
+                    "ja": "ヨーロッパ",
+                    "en": "In Europe"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c2",
+                  "text": {
+                    "fr": "En Asie",
+                    "ja": "アジア",
+                    "en": "In Asia"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c3",
+                  "text": {
+                    "fr": "En Amérique du Sud",
+                    "ja": "南米",
+                    "en": "In South America"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q2_c4",
+                  "text": {
+                    "fr": "En Afrique",
+                    "ja": "アフリカ",
+                    "en": "In Africa"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            },
+            {
+              "id": "q3",
+              "question": {
+                "fr": "Quel animal est dans le parc ?",
+                "ja": "公園にはどんな動物がいますか？",
+                "en": "What animal is in the park?"
+              },
+              "choices": [
+                {
+                  "id": "q3_c1",
+                  "text": {
+                    "fr": "Un chat",
+                    "ja": "猫",
+                    "en": "A cat"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c2",
+                  "text": {
+                    "fr": "Un jaguar",
+                    "ja": "ジャガー",
+                    "en": "A jaguar"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q3_c3",
+                  "text": {
+                    "fr": "Un tigre",
+                    "ja": "トラ",
+                    "en": "A tiger"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c4",
+                  "text": {
+                    "fr": "Un chien",
+                    "ja": "犬",
+                    "en": "A dog"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            }
+          ]
+        },
+        "LVL_2": {
+          "title": {
+            "fr": "La frontière avec le Brésil",
+            "ja": "ブラジルとの国境",
+            "en": "The border with Brazil"
+          },
+          "paragraphs": [
+            {
+              "id": "p1",
+              "fr": "L'Espagne est un pays voisin de la France.",
+              "ja": "スペインはフランスの隣国です。",
+              "en": "Spain is a neighboring country of France."
+            },
+            {
+              "id": "p2",
+              "fr": "Mais la France a une frontière plus grande avec le Brésil.",
+              "ja": "しかし、フランスはブラジルとより大きな国境を持っています。",
+              "en": "But France has a larger border with Brazil."
+            },
+            {
+              "id": "p3",
+              "fr": "C'est très surprenant.",
+              "ja": "これはとても驚くべきことです。",
+              "en": "This is very surprising."
+            },
+            {
+              "id": "p4",
+              "fr": "Cela est possible grâce à la Guyane.",
+              "ja": "これはギアナのおかげで可能です。",
+              "en": "This is possible thanks to Guiana."
+            },
+            {
+              "id": "p5",
+              "fr": "La Guyane se trouve en Amérique du Sud.",
+              "ja": "ギアナは南米にあります。",
+              "en": "Guiana is located in South America."
+            },
+            {
+              "id": "p6",
+              "fr": "Elle a une frontière de 730 kilomètres avec le Brésil.",
+              "ja": "それはブラジルと730キロメートルの国境を持っています。",
+              "en": "It has a 730-kilometer border with Brazil."
+            },
+            {
+              "id": "p7",
+              "fr": "Cette frontière est à la forêt amazonienne.",
+              "ja": "この国境はアマゾンの森にあります。",
+              "en": "This border is at the Amazon rainforest."
+            },
+            {
+              "id": "p8",
+              "fr": "La Guyane est un vrai département de la France.",
+              "ja": "ギアナはフランスの本当の県です。",
+              "en": "Guiana is a real department of France."
+            },
+            {
+              "id": "p9",
+              "fr": "Les habitants paient avec des euros.",
+              "ja": "住民はユーロで支払いをします。",
+              "en": "The inhabitants pay with euros."
+            },
+            {
+              "id": "p10",
+              "fr": "Ils habitent en Amérique du Sud mais ils sont européens.",
+              "ja": "彼らは南米に住んでいますが、ヨーロッパ人です。",
+              "en": "They live in South America but they are European."
+            },
+            {
+              "id": "p11",
+              "fr": "L'Union européenne touche donc la jungle.",
+              "ja": "だから、欧州連合はジャングルに接しています。",
+              "en": "The European Union therefore touches the jungle."
+            },
+            {
+              "id": "p12",
+              "fr": "Il y a un très grand parc avec des jaguars en Guyane.",
+              "ja": "ギアナにはジャガーがいるとても大きな公園があります。",
+              "en": "There is a very large park with jaguars in Guiana."
+            },
+            {
+              "id": "p13",
+              "fr": "Comme la Guyane est française, la France a des jaguars !",
+              "ja": "ギアナはフランスなので、フランスにはジャガーがいます！",
+              "en": "Since Guiana is French, France has jaguars!"
+            }
+          ],
+          "quiz": [
+            {
+              "id": "q1",
+              "question": {
+                "fr": "Quel pays a la plus grande frontière avec la France ?",
+                "ja": "どの国がフランスと最も大きな国境を持っていますか？",
+                "en": "Which country has the largest border with France?"
+              },
+              "choices": [
+                {
+                  "id": "q1_c1",
+                  "text": {
+                    "fr": "L'Espagne",
+                    "ja": "スペイン",
+                    "en": "Spain"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q1_c2",
+                  "text": {
+                    "fr": "L'Italie",
+                    "ja": "イタリア",
+                    "en": "Italy"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q1_c3",
+                  "text": {
+                    "fr": "Le Brésil",
+                    "ja": "ブラジル",
+                    "en": "Brazil"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q1_c4",
+                  "text": {
+                    "fr": "L'Allemagne",
+                    "ja": "ドイツ",
+                    "en": "Germany"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            },
+            {
+              "id": "q2",
+              "question": {
+                "fr": "Comment paient les habitants de la Guyane ?",
+                "ja": "ギアナの住民はどうやって支払いますか？",
+                "en": "How do the inhabitants of Guiana pay?"
+              },
+              "choices": [
+                {
+                  "id": "q2_c1",
+                  "text": {
+                    "fr": "Avec des dollars",
+                    "ja": "ドルで",
+                    "en": "With dollars"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c2",
+                  "text": {
+                    "fr": "Avec des euros",
+                    "ja": "ユーロで",
+                    "en": "With euros"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q2_c3",
+                  "text": {
+                    "fr": "Avec des yens",
+                    "ja": "円で",
+                    "en": "With yen"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c4",
+                  "text": {
+                    "fr": "Avec des pièces",
+                    "ja": "コインで",
+                    "en": "With coins"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            },
+            {
+              "id": "q3",
+              "question": {
+                "fr": "Quel animal y a-t-il dans le parc ?",
+                "ja": "公園にはどんな動物がいますか？",
+                "en": "What animal is in the park?"
+              },
+              "choices": [
+                {
+                  "id": "q3_c1",
+                  "text": {
+                    "fr": "Des lions",
+                    "ja": "ライオン",
+                    "en": "Lions"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c2",
+                  "text": {
+                    "fr": "Des ours",
+                    "ja": "クマ",
+                    "en": "Bears"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c3",
+                  "text": {
+                    "fr": "Des tigres",
+                    "ja": "トラ",
+                    "en": "Tigers"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c4",
+                  "text": {
+                    "fr": "Des jaguars",
+                    "ja": "ジャガー",
+                    "en": "Jaguars"
+                  },
+                  "isCorrect": true
+                }
+              ]
+            }
+          ]
+        },
+        "LVL_3": {
+          "title": {
+            "fr": "La plus grande frontière de la France",
+            "ja": "フランスの最大の国境",
+            "en": "France's largest border"
+          },
+          "paragraphs": [
+            {
+              "id": "p1",
+              "fr": "L'Espagne a une longue frontière avec la France.",
+              "ja": "スペインはフランスと長い国境を持っています。",
+              "en": "Spain has a long border with France."
+            },
+            {
+              "id": "p2",
+              "fr": "Mais la plus grande frontière de la France est avec le Brésil.",
+              "ja": "しかし、フランスの最も長い国境はブラジルとのものです。",
+              "en": "But France's largest border is with Brazil."
+            },
+            {
+              "id": "p3",
+              "fr": "Cette situation étonnante est possible grâce à la Guyane.",
+              "ja": "この驚くべき状況はギアナのおかげで可能です。",
+              "en": "This surprising situation is possible thanks to Guiana."
+            },
+            {
+              "id": "p4",
+              "fr": "La Guyane est une région française en Amérique du Sud.",
+              "ja": "ギアナは南米にあるフランスの地域です。",
+              "en": "Guiana is a French region in South America."
+            },
+            {
+              "id": "p5",
+              "fr": "La frontière avec le Brésil fait 730 kilomètres de long.",
+              "ja": "ブラジルとの国境は長さ730キロメートルです。",
+              "en": "The border with Brazil is 730 kilometers long."
+            },
+            {
+              "id": "p6",
+              "fr": "Elle se trouve au milieu de la forêt amazonienne.",
+              "ja": "それはアマゾンの森の真ん中にあります。",
+              "en": "It is located in the middle of the Amazon rainforest."
+            },
+            {
+              "id": "p7",
+              "fr": "La frontière avec l'Espagne est beaucoup plus petite.",
+              "ja": "スペインとの国境はずっと小さいです。",
+              "en": "The border with Spain is much smaller."
+            },
+            {
+              "id": "p8",
+              "fr": "La Guyane est un vrai département de la France depuis 1946.",
+              "ja": "ギアナは1946年からフランスの本当の県です。",
+              "en": "Guiana has been a real department of France since 1946."
+            },
+            {
+              "id": "p9",
+              "fr": "Les habitants paient avec des euros.",
+              "ja": "住民はユーロで支払いをします。",
+              "en": "The inhabitants pay with euros."
+            },
+            {
+              "id": "p10",
+              "fr": "Ce sont des citoyens de l'Union européenne.",
+              "ja": "彼らは欧州連合の市民です。",
+              "en": "They are citizens of the European Union."
+            },
+            {
+              "id": "p11",
+              "fr": "L'Europe touche donc la jungle du Brésil.",
+              "ja": "だから、ヨーロッパはブラジルのジャングルに接しています。",
+              "en": "Europe therefore touches the Brazilian jungle."
+            },
+            {
+              "id": "p12",
+              "fr": "Le plus grand parc de France se trouve aussi en Guyane.",
+              "ja": "フランス最大の公園もギアナにあります。",
+              "en": "The largest park in France is also located in Guiana."
+            },
+            {
+              "id": "p13",
+              "fr": "Ce parc protège beaucoup d'animaux comme les jaguars.",
+              "ja": "この公園はジャガーのような多くの動物を保護しています。",
+              "en": "This park protects many animals like jaguars."
+            },
+            {
+              "id": "p14",
+              "fr": "C'est pour ça que la France a des jaguars sur son territoire !",
+              "ja": "だからフランスの領土にはジャガーがいるのです！",
+              "en": "That is why France has jaguars on its territory!"
+            }
+          ],
+          "quiz": [
+            {
+              "id": "q1",
+              "question": {
+                "fr": "Combien mesure la frontière avec le Brésil ?",
+                "ja": "ブラジルとの国境の長さはどれくらいですか？",
+                "en": "How long is the border with Brazil?"
+              },
+              "choices": [
+                {
+                  "id": "q1_c1",
+                  "text": {
+                    "fr": "623 kilomètres",
+                    "ja": "623キロメートル",
+                    "en": "623 kilometers"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q1_c2",
+                  "text": {
+                    "fr": "730 kilomètres",
+                    "ja": "730キロメートル",
+                    "en": "730 kilometers"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q1_c3",
+                  "text": {
+                    "fr": "1000 kilomètres",
+                    "ja": "1000キロメートル",
+                    "en": "1000 kilometers"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q1_c4",
+                  "text": {
+                    "fr": "500 kilomètres",
+                    "ja": "500キロメートル",
+                    "en": "500 kilometers"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            },
+            {
+              "id": "q2",
+              "question": {
+                "fr": "Quelle monnaie utilisent les habitants ?",
+                "ja": "住民はどの通貨を使用しますか？",
+                "en": "What currency do the inhabitants use?"
+              },
+              "choices": [
+                {
+                  "id": "q2_c1",
+                  "text": {
+                    "fr": "Les dollars",
+                    "ja": "ドル",
+                    "en": "Dollars"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c2",
+                  "text": {
+                    "fr": "Les francs",
+                    "ja": "フラン",
+                    "en": "Francs"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c3",
+                  "text": {
+                    "fr": "Les yens",
+                    "ja": "円",
+                    "en": "Yen"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c4",
+                  "text": {
+                    "fr": "Les euros",
+                    "ja": "ユーロ",
+                    "en": "Euros"
+                  },
+                  "isCorrect": true
+                }
+              ]
+            },
+            {
+              "id": "q3",
+              "question": {
+                "fr": "Où se trouve le plus grand parc ?",
+                "ja": "最大の公園はどこにありますか？",
+                "en": "Where is the largest park located?"
+              },
+              "choices": [
+                {
+                  "id": "q3_c1",
+                  "text": {
+                    "fr": "En Espagne",
+                    "ja": "スペイン",
+                    "en": "In Spain"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c2",
+                  "text": {
+                    "fr": "À Paris",
+                    "ja": "パリ",
+                    "en": "In Paris"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c3",
+                  "text": {
+                    "fr": "En Guyane",
+                    "ja": "ギアナ",
+                    "en": "In Guiana"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q3_c4",
+                  "text": {
+                    "fr": "En Afrique",
+                    "ja": "アフリカ",
+                    "en": "In Africa"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            }
+          ]
+        },
+        "LVL_4": {
+          "title": {
+            "fr": "Le secret de la frontière avec le Brésil",
+            "ja": "ブラジルとの国境の秘密",
+            "en": "The secret of the border with Brazil"
+          },
+          "paragraphs": [
+            {
+              "id": "p1",
+              "fr": "Quand on pense à la plus grande frontière de la France, on imagine tout de suite l'Espagne.",
+              "ja": "フランスの最も長い国境と聞くと、すぐにスペインを想像します。",
+              "en": "When we think of France's largest border, we immediately imagine Spain."
+            },
+            {
+              "id": "p2",
+              "fr": "Pourtant, la vraie réponse est le Brésil, ce qui est très surprenant !",
+              "ja": "しかし、本当の答えはブラジルで、これはとても驚きです！",
+              "en": "Yet, the real answer is Brazil, which is very surprising!"
+            },
+            {
+              "id": "p3",
+              "fr": "C'est possible grâce à la Guyane.",
+              "ja": "これはギアナのおかげで可能です。",
+              "en": "This is possible thanks to Guiana."
+            },
+            {
+              "id": "p4",
+              "fr": "Cette région se trouve en Amérique du Sud et partage 730 kilomètres de frontière avec le Brésil.",
+              "ja": "この地域は南米にあり、ブラジルと730キロメートルの国境を共有しています。",
+              "en": "This region is in South America and shares a 730-kilometer border with Brazil."
+            },
+            {
+              "id": "p5",
+              "fr": "Tout ça se passe en plein milieu de la forêt amazonienne.",
+              "ja": "これらはすべて、アマゾンの熱帯雨林の真ん中で起きています。",
+              "en": "All this happens right in the middle of the Amazon rainforest."
+            },
+            {
+              "id": "p6",
+              "fr": "C'est beaucoup plus long que la frontière espagnole, qui fait seulement 623 kilomètres.",
+              "ja": "それはわずか623キロメートルしかないスペインとの国境よりもずっと長いです。",
+              "en": "It is much longer than the Spanish border, which is only 623 kilometers."
+            },
+            {
+              "id": "p7",
+              "fr": "Et attention, la Guyane n'est pas juste un territoire lointain.",
+              "ja": "そして注意してほしいのは、ギアナは単なる遠くの領土ではないということです。",
+              "en": "And mind you, Guiana is not just a distant territory."
+            },
+            {
+              "id": "p8",
+              "fr": "C'est un vrai département français depuis 1946.",
+              "ja": "1946年以来、れっきとしたフランスの県なのです。",
+              "en": "It has been a real French department since 1946."
+            },
+            {
+              "id": "p9",
+              "fr": "Les habitants sont des citoyens européens et ils utilisent des euros tous les jours.",
+              "ja": "住民はヨーロッパ市民であり、毎日ユーロを使っています。",
+              "en": "The inhabitants are European citizens and they use euros every day."
+            },
+            {
+              "id": "p10",
+              "fr": "Ça veut dire que l'Europe a une frontière directe avec la jungle !",
+              "ja": "つまり、ヨーロッパはジャングルと直接の国境を持っているということです！",
+              "en": "That means Europe has a direct border with the jungle!"
+            },
+            {
+              "id": "p11",
+              "fr": "D'ailleurs, le plus grand parc national français est là-bas pour protéger les jaguars.",
+              "ja": "ちなみに、ジャガーを保護するためのフランス最大の国立公園もそこにあります。",
+              "en": "By the way, the largest French national park is there to protect jaguars."
+            },
+            {
+              "id": "p12",
+              "fr": "Comme quoi, la France ne s'arrête pas aux frontières de l'Europe !",
+              "ja": "このように、フランスはヨーロッパの国境で終わるわけではないのです！",
+              "en": "Thus, France does not stop at the borders of Europe!"
+            }
+          ],
+          "quiz": [
+            {
+              "id": "q1",
+              "question": {
+                "fr": "Quelle frontière est plus longue ?",
+                "ja": "どの国境がより長いですか？",
+                "en": "Which border is longer?"
+              },
+              "choices": [
+                {
+                  "id": "q1_c1",
+                  "text": {
+                    "fr": "Celle de l'Espagne",
+                    "ja": "スペインとの国境",
+                    "en": "Spain's"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q1_c2",
+                  "text": {
+                    "fr": "Celle de l'Italie",
+                    "ja": "イタリアとの国境",
+                    "en": "Italy's"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q1_c3",
+                  "text": {
+                    "fr": "Celle du Brésil",
+                    "ja": "ブラジルとの国境",
+                    "en": "Brazil's"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q1_c4",
+                  "text": {
+                    "fr": "Celle de l'Allemagne",
+                    "ja": "ドイツとの国境",
+                    "en": "Germany's"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            },
+            {
+              "id": "q2",
+              "question": {
+                "fr": "Où se trouve la Guyane ?",
+                "ja": "ギアナはどこにありますか？",
+                "en": "Where is Guiana located?"
+              },
+              "choices": [
+                {
+                  "id": "q2_c1",
+                  "text": {
+                    "fr": "En Afrique",
+                    "ja": "アフリカ",
+                    "en": "In Africa"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c2",
+                  "text": {
+                    "fr": "En Asie",
+                    "ja": "アジア",
+                    "en": "In Asia"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c3",
+                  "text": {
+                    "fr": "En Europe",
+                    "ja": "ヨーロッパ",
+                    "en": "In Europe"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q2_c4",
+                  "text": {
+                    "fr": "En Amérique du Sud",
+                    "ja": "南米",
+                    "en": "In South America"
+                  },
+                  "isCorrect": true
+                }
+              ]
+            },
+            {
+              "id": "q3",
+              "question": {
+                "fr": "Quel animal le parc protège-t-il ?",
+                "ja": "公園はどんな動物を保護していますか？",
+                "en": "What animal does the park protect?"
+              },
+              "choices": [
+                {
+                  "id": "q3_c1",
+                  "text": {
+                    "fr": "Les lions",
+                    "ja": "ライオン",
+                    "en": "Lions"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c2",
+                  "text": {
+                    "fr": "Les jaguars",
+                    "ja": "ジャガー",
+                    "en": "Jaguars"
+                  },
+                  "isCorrect": true
+                },
+                {
+                  "id": "q3_c3",
+                  "text": {
+                    "fr": "Les tigres",
+                    "ja": "トラ",
+                    "en": "Tigers"
+                  },
+                  "isCorrect": false
+                },
+                {
+                  "id": "q3_c4",
+                  "text": {
+                    "fr": "Les loups",
+                    "ja": "オオカミ",
+                    "en": "Wolves"
+                  },
+                  "isCorrect": false
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,715 @@
+================================================================================
+DOCUMENTATION TECHNIQUE ET FONCTIONNELLE COMPLÈTE — PROJET FURAGO WEB (フラゴ)
+================================================================================
+Dernière mise à jour : Septembre 2026
+Dépôt GitHub du code Web : https://github.com/kohaiducode/furago-web.git
+Source de données des articles : https://kohaiducode.github.io/furago-data/articles.json
+
+--------------------------------------------------------------------------------
+TABLE DES MATIÈRES
+--------------------------------------------------------------------------------
+1. VUE D'ENSEMBLE ET PHILOSOPHIE DU PROJET
+2. STACK TECHNIQUE ET ARCHITECTURE GLOBALE
+3. STRUCTURE DU PROJET (ARBORESCENCE ET RÔLE DE CHAQUE FICHIER)
+4. FONCTIONNEMENT DÉTAILLÉ DU CODE (MODULE PAR MODULE)
+   4.1. Chargement hybride des articles (Build-time + Temps réel)
+   4.2. Gestion des images Google Drive et système anti-blocage
+   4.3. Moteur de dictionnaire hors-ligne, lemmatisation et WSD (Désambiguïsation)
+   4.4. Lecture interactive, découpage lexical et pop-up géométrique
+   4.5. Synthèse vocale (Text-to-Speech) et surlignage mot à mot sans décalage
+   4.6. Quiz de compréhension interactif
+   4.7. Carnet de vocabulaire (単語帳) et persistance locale
+   4.8. Capture d'emails (Lead Generation), modale en 3 étapes et Optimistic UI
+   4.9. Backend Serverless Google Apps Script & Google Sheets (Newsletter)
+5. SYSTÈME DE DESIGN, UI/UX ET RESPONSIVE (MOBILE & DESKTOP)
+6. SEO (RÉFÉRENCEMENT NATUREL), PERFORMANCE ET ACCESSIBILITÉ
+7. COMMENT TOUT EST MANAGÉ AU QUOTIDIEN (ADMINISTRATION)
+8. PROCESSUS DE PUBLICATION ET DE DÉPLOIEMENT (DE A À Z)
+
+================================================================================
+1. VUE D'ENSEMBLE ET PHILOSOPHIE DU PROJET
+================================================================================
+
+Furago (フラゴ) est une application web éducative destinée aux apprenants japonais
+souhaitant apprendre et pratiquer le français à travers la lecture d'articles
+culturels et d'actualité, l'écoute audio synchronisée et des quiz de compréhension.
+
+Chaque article publié sur Furago est décliné en 5 niveaux du CECRL :
+- A1 (入門・初心者 - Débutant complet)
+- A2 (初級 - Élémentaire)
+- B1 (中級 - Intermédiaire)
+- B2 (中上級 - Intermédiaire avancé)
+- C1 (上級 - Avancé / Autonome)
+
+L'objectif principal de l'architecture actuelle est d'offrir :
+1. Une expérience utilisateur instantanée ("Zero Latency") sur mobile, tablette et PC.
+2. Une autonomie complète de l'apprenant : un simple clic/tap sur n'importe quel
+   mot français affiche sa forme conjuguée, son infinitif/singulier (lemme), sa
+   nature grammaticale, sa définition exacte en contexte (en japonais) ainsi que
+   la traduction de la phrase entière.
+3. Une infrastructure 100 % gratuite, robuste et sans maintenance serveur complexe
+   ("Serverless / Static Architecture"), combinant :
+   - Next.js en export statique pour le front-end.
+   - GitHub Pages (dépôt `furago-data`) comme CDN JSON pour les articles.
+   - Google Drive (via le CDN `lh3.googleusercontent.com`) pour l'hébergement des images.
+   - Google Sheets + Google Apps Script + Gmail pour la base de données utilisateurs
+     et l'envoi automatique des emails de bienvenue de la newsletter.
+   - Le stockage local du navigateur (`localStorage`) pour le carnet de vocabulaire
+     de l'utilisateur sans l'obliger à créer un compte pour réviser ses mots.
+
+================================================================================
+2. STACK TECHNIQUE ET ARCHITECTURE GLOBALE
+================================================================================
+
+- Framework Front-End : Next.js 16.3.6 (App Router)
+- Bibliothèque UI     : React 19.2.8 & React DOM 19.2.8
+- Langage             : TypeScript 5 (typage strict activé)
+- Styling             : CSS3 natif à variables (`src/app/globals.css`) + Tailwind CSS v4
+- Mode de rendu       : Export statique (`output: "export"` dans `next.config.ts`)
+- Synthèse vocale     : Web Speech API native (`window.speechSynthesis`)
+- Traduction neuronale: API Google Translate GTX (`fr` -> `ja`) avec cache mémoire
+                        et fallback sur le dictionnaire hors-ligne (`dict.json`)
+- Base de données CRM : Google Sheets piloté par Google Apps Script (`doGet`/`doPost`)
+
+Schéma des flux de données :
+----------------------------
+[Dépôt furago-data (articles.json)] ──(1. Pré-rendu au build + 2. Fetch live)──> [Application Web Next.js]
+[Google Drive Images]               ──(CDN lh3.googleusercontent.com)──────────> [Application Web Next.js]
+[Dictionnaire local (/assets/dict.json)] ──(Chargé en RAM client)──────────────> [Moteur de Lemmatisation & WSD]
+[API Google Translate GTX]          ──(Traduction de phrase < 1.8s + Cache)────> [Moteur de Lemmatisation & WSD]
+[Formulaire Newsletter 3 étapes]    ──(POST JSON sans blocage CORS)────────────> [Google Apps Script -> Google Sheets + Gmail]
+
+================================================================================
+3. STRUCTURE DU PROJET (ARBORESCENCE ET RÔLE DE CHAQUE FICHIER)
+================================================================================
+
+Racine du projet (`c:\Users\81704\Desktop\Code\FuragoWeb\`) :
+│
+├── package.json
+│   Définit les dépendances (`next`, `react`, `react-dom`, `tailwindcss`, `typescript`)
+│   et les scripts de commande (`npm run dev`, `npm run build`, `npm run start`, `npm run lint`).
+│
+├── next.config.ts
+│   Configuration de Next.js. Contient `output: "export"`, ce qui ordonne à Next.js
+│   de compiler toute l'application sous forme de fichiers statiques HTML/CSS/JS
+│   dans le dossier `out/` lors du build, prêt pour Cloudflare Pages, Vercel ou GitHub Pages.
+│
+├── tsconfig.json
+│   Configuration du compilateur TypeScript. Définit notamment l'alias `@/*` qui
+│   pointe vers `./src/*` (permettant d'écrire `import ... from "@/lib/dictionary"`).
+│
+├── postcss.config.mjs & eslint.config.mjs
+│   Fichiers de configuration pour le préprocesseur CSS (`@tailwindcss/postcss`)
+│   et l'analyseur de code statique ESLint (`eslint-config-next`).
+│
+├── .env.local (Non suivi par Git pour la sécurité)
+│   Fichier d'environnement local pouvant contenir `NEXT_PUBLIC_GOOGLE_SCRIPT_URL`
+│   pour surcharger l'URL du Web App Google Apps Script.
+│
+├── AGENTS.md & CLAUDE.md
+│   Fichiers de règles générés automatiquement par Next.js 16 lors de l'exécution
+│   de `next dev` pour informer les assistants IA des conventions de cette version.
+│
+├── google_apps_script_newsletter.js
+│   Code source complet du backend Serverless Google Apps Script à copier-coller
+│   dans l'éditeur Apps Script du Google Sheet de gestion de la newsletter.
+│   Gère la création automatique des feuilles `Users` et `EmailTemplate`, la
+│   détection des doublons d'emails et l'envoi des emails HTML de bienvenue.
+│
+├── public/
+│   ├── assets/
+│   │   └── dict.json (env. 653 Ko)
+│   │       Base de données JSON du dictionnaire français-japonais servie statiquement
+│   │       à l'URL `/assets/dict.json` et chargée en mémoire par le navigateur.
+│   └── (file.svg, globe.svg, next.svg, vercel.svg, window.svg)
+│       Icônes SVG statiques standards.
+│
+└── src/
+    ├── app/
+    │   ├── favicon.ico
+    │   │   Icône de l'onglet du navigateur.
+    │   │
+    │   ├── layout.tsx
+    │   │   Layout racine (Server Component) de l'application Next.js.
+    │   │   Définit la langue principale `<html lang="ja">`, importe `globals.css`
+    │   │   et déclare les métadonnées SEO globales (`title` et `description`).
+    │   │
+    │   ├── page.tsx
+    │   │   Page d'accueil (Server Component asynchrone).
+    │   │   Exécute `getArticles()` au moment du build pour télécharger les articles
+    │   │   depuis `furago-data/articles.json`, les trier par date décroissante et
+    │   │   les passer en tant que prop `initialArticles` à `<FuragoApp />`.
+    │   │
+    │   └── globals.css (955 lignes)
+    │       Feuille de style globale contenant l'intégralité du Design System :
+    │       variables de couleurs, mise en page fluide responsive, cartes d'articles
+    │       (Hero & Grille), lecteur audio flottant, bulle de dictionnaire avec flèche
+    │       dynamique, animations, quiz, modales et barre de capture d'email.
+    │
+    ├── components/
+    │   └── FuragoApp.tsx (2 673 lignes)
+    │       Composant client principal (`"use client"`) qui orchestre toute
+    │       l'interactivité de l'application : navigation entre les 3 vues (Accueil,
+    │       Lecture, Carnet de mots), filtrage par niveau et catégorie, lecture audio
+    │       TTS avec surlignage mot à mot, pop-up dictionnaire, quiz de compréhension,
+    │       gestion du carnet de vocabulaire (`localStorage`) et tunnel d'inscription
+    │       Newsletter en 3 étapes.
+    │
+    ├── lib/
+    │   └── dictionary.ts (694 lignes)
+    │       Moteur linguistique de Furago : nettoyage des mots, lemmatisation
+    │       morphologique française (pluriels, féminins, conjugaisons 1er/2e/3e groupes,
+    │       verbes irréguliers, lemmes prioritaires), extraction de la phrase de
+    │       contexte, appel à l'API de traduction neuronale avec cache, et algorithme
+    │       de désambiguïsation lexicale automatique (WSD).
+    │
+    └── data/
+        └── dict.json
+            Copie de référence du dictionnaire français-japonais dans `src/data/`.
+
+================================================================================
+4. FONCTIONNEMENT DÉTAILLÉ DU CODE (MODULE PAR MODULE)
+================================================================================
+
+--------------------------------------------------------------------------------
+4.1. Chargement hybride des articles (Build-time + Temps réel)
+--------------------------------------------------------------------------------
+Fichiers concernés : `src/app/page.tsx` et `src/components/FuragoApp.tsx`
+
+Le chargement des articles repose sur une stratégie à double détente très astucieuse :
+
+1. Au moment du Build (`src/app/page.tsx`) :
+   La fonction serveur `getArticles()` interroge :
+   `https://kohaiducode.github.io/furago-data/articles.json`
+   Elle filtre les articles valides (`a.levels && Object.keys(a.levels).length > 0`)
+   et les trie du plus récent au plus ancien (`new Date(b.date) - new Date(a.date)`).
+   Ces articles sont injectés dans `<FuragoApp initialArticles={articles} />`.
+   Avantage : Le fichier HTML généré contient déjà les articles. L'affichage initial
+   est donc immédiat (0 seconde d'écran blanc) et les moteurs de recherche voient
+   tout le contenu dès le premier chargement.
+
+2. En temps réel dans le navigateur (`src/components/FuragoApp.tsx`, lignes 194-217) :
+   Dès que l'application s'ouvre chez l'utilisateur, un `useEffect` relance un
+   `fetch("https://kohaiducode.github.io/furago-data/articles.json")` en arrière-plan.
+   Avantage : Si un nouvel article vient d'être publié dans le dépôt `furago-data`,
+   il apparaît immédiatement chez tous les utilisateurs sans même avoir besoin de
+   recompiler ou redéployer l'application web `furago-web` !
+
+--------------------------------------------------------------------------------
+4.2. Gestion des images Google Drive et système anti-blocage
+--------------------------------------------------------------------------------
+Fichier concerné : `src/components/FuragoApp.tsx` (lignes 54-71, 1075-1090, 1139-1152)
+
+Les images des articles sont stockées sur Google Drive. Or, les liens de partage
+classiques Google Drive (`https://drive.google.com/file/d/XXXX/view?...`) ne peuvent
+pas être affichés directement dans une balise `<img>` standard et subissent souvent
+des blocages de cookies tiers ou de quotas.
+
+Pour résoudre ce problème :
+1. `extractDriveId(url)` extrait l'identifiant unique du fichier Google Drive via deux
+   expressions régulières (`/\/d\/([a-zA-Z0-9_-]+)/` et `/[?&]id=([a-zA-Z0-9_-]+)/`).
+2. `formatDriveUrl(url)` convertit cet ID en lien direct vers le serveur CDN haute
+   performance de Google Photos/Drive :
+   `https://lh3.googleusercontent.com/d/${id}=w1000` (redimensionné à 1000px de large).
+3. Chaque balise `<img>` utilise `referrerPolicy="no-referrer"` et `loading="lazy"`.
+4. Un gestionnaire d'erreur `onError` automatique bascule vers une URL de secours
+   (`https://drive.google.com/thumbnail?id=${id}&sz=w1000`) si jamais le premier
+   serveur ne répond pas.
+
+--------------------------------------------------------------------------------
+4.3. Moteur de dictionnaire hors-ligne, lemmatisation et WSD
+--------------------------------------------------------------------------------
+Fichier concerné : `src/lib/dictionary.ts`
+
+Lorsqu'un utilisateur clique sur un mot français dans un article, la méthode
+`DictionaryService.lookupWord(word, surroundingSentence)` exécute un pipeline
+linguistique en 7 étapes :
+
+Étape 1 — Nettoyage et retrait des élisions (lignes 504-511) :
+- Conversion en minuscules et suppression de la ponctuation (`.,!?:;"'()[]«»„“”`).
+- Suppression des élisions françaises en début de mot :
+  `l'`, `d'`, `qu'`, `j'`, `m'`, `t'`, `s'`, `n'`, `c'`, `ç'` (gère à la fois
+  l'apostrophe droite `'` et l'apostrophe typographique courbe `’`).
+  Exemple : `l'histoire` devient `histoire`, `qu'il` devient `il`.
+
+Étape 2 — Extraction de la phrase ou proposition de contexte (lignes 448-475) :
+- La fonction `getShortTargetedContext(paragraphText, word)` découpe le paragraphe
+  en phrases individuelles via `/(?<=[.!?\n])\s+/`.
+- Elle repère la phrase exacte contenant le mot cliqué en vérifiant les frontières
+  de mots français (caractères accentués inclus : `a-zA-ZÀ-ÿœŒæÆ`).
+- Si la phrase est très longue (plus de 22 mots), elle la découpe selon la ponctuation
+  secondaire (`;`, `:`, `—`, `–`) pour n'extraire que la proposition contenant le mot
+  (à condition qu'elle fasse au moins 4 mots). Cela garantit un pop-up compact et
+  lisible sur petit écran !
+
+Étape 3 — Traduction contextuelle neuronale avec cache et timeout (lignes 516-542) :
+- Vérifie d'abord si la phrase figure déjà dans `this.sentenceCache` (`Map<string, string>`).
+- Si elle n'y est pas, appelle l'API Google Translate GTX (`sl=fr&tl=ja`) avec un
+  `AbortController` réglé sur un timeout strict de 1 800 ms (1,8 seconde).
+- Si l'utilisateur est hors-ligne ou que le réseau est trop lent, la requête est
+  interrompue proprement sans bloquer l'affichage du dictionnaire hors-ligne.
+
+Étape 4 — Lemmatisation morphologique française (lignes 19-446) :
+Pour retrouver l'entrée du dictionnaire à partir d'un mot conjugué ou accordé,
+le moteur génère une liste de lemmes candidats (`lookupKeys`) :
+- `PRIORITY_LEMMAS` (lignes 19-244) : Dictionnaire prioritaire fait main pour les
+  formes conjuguées et accordées des 26 verbes et adjectifs les plus fréquents du
+  français (`être`, `avoir`, `aller`, `faire`, `bon`, `connaître`, `beau`, `nouveau`,
+  `grand`, `petit`, `premier`, `dernier`, `vrai`, `long`, `blanc`, `pouvoir`,
+  `vouloir`, `devoir`, `savoir`, `voir`, `prendre`, `mettre`, `dire`, `venir`,
+  `comprendre`, `apprendre`). Cela évite les faux positifs fréquents dans les
+  dictionnaires automatiques (ex: éviter que "est" soit traduit uniquement par le
+  point cardinal "東 [Est]" au lieu du verbe "être", ou "été" uniquement par "夏"
+  sans mentionner le participe passé de "être").
+- `IRREGULAR_VERBS` (lignes 246-330) : Table complète de toutes les conjugaisons
+  irrégulières (présent, imparfait, passé simple, futur, conditionnel, subjonctif,
+  participe) + détection automatique des préfixes dérivés (`re-`, `dé-`, `com-`,
+  `sur-`, `in-`, `im-`, `ap-`, `sou-`, `con-`, `pre-`, `par-`, `inter-`). Ainsi,
+  `devient` ou `revient` est automatiquement rattaché à `venir` -> `devenir`/`revenir`.
+- `getLemmaCandidates()` (lignes 332-446) :
+  * Règles du pluriel : `-aux` -> `-al` / `-ail` (ex: `journaux` -> `journal`),
+    `-eaux` -> `-eau`, `-s`, `-x`.
+  * Règles du féminin : `-euse(s)` -> `-eur`/`-eux`, `-trice(s)` -> `-teur`,
+    `-ière(s)` -> `-ier`, `-ienne(s)` -> `-ien`, `-elle(s)` -> `-el`/`-eau`,
+    `-ive(s)` -> `-if`, consonnes doublées (`-nne`, `-sse`, `-tte`).
+  * Terminaisons verbales du 1er groupe (`-er`) : gère toutes les terminaisons
+    (`-erait`, `-eraient`, `-assent`, `-èrent`, `-aient`, `-ions`, `-ant`, `-ée`, etc.)
+    ainsi que les alternances orthographiques (`ç` -> `cer`, consonnes doublées
+    comme `appelle` -> `appeler`, et accents graves `è` -> `e`/`é` comme `achète` -> `acheter`).
+  * Terminaisons des 2e et 3e groupes : `-ir` (`-issaient`, `-issant`, `-iront`, etc.),
+    `-dre` (`-dent`, `-dait`, `-dront`, `-du`, etc.) et `-re` / `-tre`.
+
+Étape 5 — Recherche dans `dict.json` et regroupement par nature grammaticale (lignes 580-627) :
+- Chaque entrée de `/assets/dict.json` possède la structure compacte :
+  `k` (mots en Kanji), `r` (lectures en Kana), `p` (parties du discours : 動詞, 形容詞, 名詞...).
+- Les traductions sont nettoyées des parenthèses explicatives superflues et regroupées
+  par nature grammaticale (POS), avec un bonus de priorité pour les verbes (+3),
+  les adjectifs (+2) et les noms (+1).
+
+Étape 6 — Désambiguïsation Lexicale Automatique (WSD - Word Sense Disambiguation, lignes 629-642) :
+- C'est l'une des fonctionnalités les plus avancées du projet : lorsqu'un mot français
+  a plusieurs sens très différents, le moteur vérifie si l'un des termes japonais
+  candidats (`s.rawTerms`) apparaît dans la traduction neuronale de la phrase entière
+  (`traductionPhrase`).
+- Si une correspondance est trouvée :
+  1. Ce sens reçoit un bonus massif de priorité (`s.priority += 50`).
+  2. Le terme correspondant est placé en toute première position de la définition !
+
+Étape 7 — Formatage multi-sens (lignes 653-689) :
+- Si un mot présente deux natures grammaticales distinctes ou deux sens pertinents,
+  le moteur affiche une définition combinée ultra-concise avec indicateurs abrégés :
+  `形` (Adjectif), `動` (Verbe), `名` (Nom).
+  Exemple : `sens1（動）/ sens2（名）`.
+
+--------------------------------------------------------------------------------
+4.4. Lecture interactive, découpage lexical et pop-up géométrique
+--------------------------------------------------------------------------------
+Fichier concerné : `src/components/FuragoApp.tsx`
+
+1. Découpage en tokens cliquables (`renderInteractiveContent`, lignes 849-919) :
+   - Le texte de l'article est divisé par sauts de ligne (`\n`) en paragraphes `<p lang="fr">`.
+   - Chaque paragraphe est parcouru par l'expression régulière :
+     `/([a-zA-ZÀ-ÿœŒæÆ]+(?:['’][a-zA-ZÀ-ÿœŒæÆ]+)?)|([^a-zA-ZÀ-ÿœŒæÆ]+)/g`
+   - Chaque mot devient un `<span className="tap-word">` cliquable, tandis que les
+     espaces et signes de ponctuation restent dans des `<span>` neutres.
+   - Chaque token conserve ses index exacts de début (`start`) et de fin (`end`)
+     à l'échelle de l'article complet (`globalOffset`), ce qui permet au lecteur
+     audio de savoir exactement quel mot surligner.
+
+2. Calcul géométrique du Pop-up Dictionnaire (lignes 495-546) :
+   - Lors d'un clic sur un mot, `e.currentTarget.getBoundingClientRect()` récupère
+     la position exacte du mot à l'écran (`dictRect`).
+   - Un `useEffect` couplé à `requestAnimationFrame` mesure la largeur et la hauteur
+     réelles de la bulle (`popupRef.current.offsetWidth` et `offsetHeight`).
+   - Protection contre les bords de l'écran (Boundary Protection) :
+     * Horizontalement : la bulle est centrée sur le mot (`leftPos`), mais contrainte
+       entre `minLeft` (14px du bord gauche) et `maxLeft` (14px du bord droit).
+     * Flèche dynamique : la variable CSS `--arrow-x` est calculée en pourcentage
+       (entre 12% et 88%) pour que la petite flèche triangulaire pointe toujours
+       exactement sur le mot cliqué, même si la bulle a été décalée près du bord de l'écran !
+     * Verticalement : la bulle s'affiche par défaut 10px au-dessus du mot. Mais si
+       le mot est trop proche du header supérieur (`spaceAbove < popupHeight + 10`),
+       la bulle passe automatiquement en dessous du mot et active la classe `.arrow-top`.
+
+--------------------------------------------------------------------------------
+4.5. Synthèse vocale (Text-to-Speech) et surlignage mot à mot sans décalage
+--------------------------------------------------------------------------------
+Fichier concerné : `src/components/FuragoApp.tsx` (lignes 220-476)
+
+1. Sélection et humanisation des voix françaises (`loadVoices`, lignes 224-277) :
+   - Interroge `window.speechSynthesis.getVoices()`.
+   - Filtre uniquement les voix françaises (`lang.startsWith("fr")`), en excluant :
+     * Les variantes canadiennes (`fr-ca` / `canada`) pour garder une prononciation
+       standard de France cohérente avec le matériel pédagogique.
+     * Les voix "network" / "réseau" qui nécessitent une connexion constante et
+       bloquent souvent l'événement `onboundary`.
+   - Déduplique les voix et détecte automatiquement si la voix est féminine ou
+     masculine via son identifiant (`vlf`, `hortense`, `julie`, `denise`, `paul`, `thomas`...).
+   - Attribue des prénoms français clairs pour l'utilisateur japonais :
+     `(女) Sophie`, `(女) Camille`, `(女) Léa`, `(男) Thomas`, `(男) Lucas`, etc.
+
+2. File d'attente de phrases (`buildQueueForText`, lignes 296-316) :
+   - Découpe le texte de l'article phrase par phrase (`/[^.!?\n]+[.!?\n]*\s*/g`) en
+     enregistrant l'offset exact de chaque phrase dans le texte global.
+   - Permet de sauter instantanément à la phrase précédente (`handlePrevSentence`),
+     à la phrase suivante (`handleNextSentence`), de mettre en pause, de recommencer
+     au début ou de changer la vitesse (`1x`, `0.8x`, `0.6x`, `0.4x`) à la volée.
+
+3. Surlignage mot à mot en temps réel ("Zero Layout Shift", lignes 356-370) :
+   - Dès qu'une phrase commence (`utterance.onstart`), `getFirstWordRange` cible
+     immédiatement le premier mot de la phrase (et jamais la phrase entière).
+   - À chaque mot prononcé par le moteur vocal, l'événement `utterance.onboundary`
+     (`e.name === "word"`) fournit `e.charIndex`. Le code calcule la longueur du mot
+     courant et met à jour `highlightRange`.
+   - En CSS (`.tts-highlight` dans `globals.css`), le surlignage utilise un fond
+     violet léger (`rgba(94, 92, 230, 0.2)`) et une ombre portée inférieure
+     (`box-shadow: 0 2px 0 0 var(--primary)`) sans modifier `font-weight` ni `padding`.
+     Ainsi, les mots ne changent jamais de largeur pendant la lecture audio : le
+     texte reste 100 % stable à l'écran.
+
+--------------------------------------------------------------------------------
+4.6. Quiz de compréhension interactif
+--------------------------------------------------------------------------------
+Fichier concerné : `src/components/FuragoApp.tsx` (lignes 1207-1324)
+
+- Sous chaque article, si le niveau sélectionné possède un tableau `quiz`, la section
+  `🧠 理解度クイズ` s'affiche.
+- Les questions s'affichent une par une (`質問 1 / N`) avec jusqu'à 4 options (`A`, `B`, `C`, `D`).
+- Lorsque l'apprenant clique sur une réponse :
+  1. Les boutons sont verrouillés (`disabled`) pour éviter le double-clic.
+  2. La bonne réponse se colore en vert (`.quiz-option.correct`) et, si l'utilisateur
+     s'est trompé, son choix se colore en rouge (`.quiz-option.incorrect`).
+  3. Un message animé (`popIn`) affiche `⭕ 正解！` ou `❌ 不正解...`.
+  4. Après `1700ms` (1,7 seconde), le quiz passe automatiquement à la question suivante.
+- À la fin, un écran récapitulatif affiche le score final (`スコア: X / N`) avec un
+  message personnalisé selon le taux de réussite et un bouton `もう一度やる` pour recommencer.
+
+--------------------------------------------------------------------------------
+4.7. Carnet de vocabulaire (単語帳) et persistance locale
+--------------------------------------------------------------------------------
+Fichier concerné : `src/components/FuragoApp.tsx` (lignes 595-652, 1328-1632)
+
+- Les données sont sauvegardées dans le navigateur via deux clés `localStorage` :
+  * `furago_lists` : Liste des dossiers/listes de vocabulaire (contient par défaut
+    la liste `{ id: "default", name: "デフォルト" }`).
+  * `furago_words` : Tableau de tous les mots enregistrés (`SavedWord[]`).
+- Depuis le pop-up dictionnaire, cliquer sur le bouton `+` :
+  * Sauvegarde immédiatement le mot dans la liste `デフォルト` s'il n'y a qu'une seule liste.
+  * Ouvre une modale de sélection (`listSelectorOpen`) si l'utilisateur a créé
+    plusieurs listes personnalisées.
+  * Vérifie les doublons (`exists`) et affiche un toast (`保存しました !` ou `すでにリストにあります`).
+- Dans l'onglet `単語帳` :
+  * Vue 1 (Dossiers) : Affiche toutes les listes avec le compteur de mots (`X 単語`)
+    et le bouton `+ 新しいリスト` pour créer un nouveau dossier thématique.
+  * Vue 2 (Contenu d'une liste) : Affiche les mots du plus récent au plus ancien
+    (`.slice().reverse()`), avec leur badge de nature grammaticale, le mot tel qu'il
+    était dans le texte + sa forme de base `(原形: ...)`, sa définition concise, la
+    phrase de contexte traduite (`文脈`), un bouton haut-parleur vert pour réécouter
+    la prononciation française et un bouton corbeille rouge pour supprimer le mot.
+
+--------------------------------------------------------------------------------
+4.8. Capture d'emails (Lead Generation), modale en 3 étapes et Optimistic UI
+--------------------------------------------------------------------------------
+Fichier concerné : `src/components/FuragoApp.tsx` (lignes 654-836, 950-985, 2199-2669)
+
+Pour convertir les visiteurs en abonnés à la newsletter tout en qualifiant finement
+leur profil d'apprentissage, Furago intègre un système en 3 étapes :
+
+1. Barre d'accroche supérieure (`.lead-bar`) :
+   - Affichée tout en haut de l'application si `localStorage.getItem("furago_lead_subscribed") !== "1"`.
+   - Permet de saisir son adresse email et de cliquer sur `登録` (ou de cliquer
+     directement sur `登録` pour ouvrir la modale).
+
+2. Modale de profilage en 3 étapes avec barre de progression :
+   - Étape 1 (`基本情報` - Informations de base) :
+     * Prénom / Nom (`名前`)
+     * Adresse email (`メールアドレス`)
+     * Genre (`性別`) : Liste déroulante (`女性`, `男性`, `回答しない`) avec une option
+       par défaut désactivée (`選択してください`) pour obliger un choix actif et éviter
+       les fausses données par défaut.
+     * Bouton `次へ` désactivé tant que les 3 champs ne sont pas remplis.
+   - Étape 2 (`フランス語レベル` - Niveau de français) :
+     * Sélection parmi les 5 niveaux (`A1` à `C1`) avec description en japonais.
+   - Étape 3 (`興味のあるテーマ` - Centres d'intérêt) :
+     * Sélection multiple sous forme de "pills" cliquables (`地理`, `文化`, `歴史`,
+       `グルメ`, `ニュース・日常` + toutes les catégories dynamiques des articles).
+     * Aucune catégorie n'est pré-sélectionnée par défaut : l'utilisateur doit en
+       choisir au moins une (`leadCategories.length > 0`) pour activer le bouton
+       final `登録を完了する`.
+
+3. Architecture "0ms Latency" (Zéro attente pour l'utilisateur) :
+   - Les appels vers Google Apps Script prennent habituellement entre 1,5 et 3 secondes.
+     Pour que l'utilisateur ne ressente aucune lenteur :
+     * Dès la validation de l'Étape 1, le contrôle local (`isEmailLocallyRegistered`)
+       vérifie en 0ms si l'email est déjà connu sur cet appareil. Si non, la modale
+       passe immédiatement à l'Étape 2 (`setLeadStep(2)`) pendant que la fonction
+       `checkEmailInBackground(normalizedEmail)` interroge Google Sheets en tâche de fond !
+     * Si Google Sheets répond que l'email existe déjà (`status: "already_exists"`),
+       la modale ramène automatiquement l'utilisateur à l'Étape 1 avec le message
+       d'erreur `このメールアドレスは既に登録されています。`.
+     * À l'Étape 3, lorsque l'utilisateur clique sur `登録を完了する`, la modale se
+       ferme instantanément (0ms), la barre du haut disparaît, le toast de succès
+       `ご登録ありがとうございます！確認メールを送信しました。` s'affiche, et la requête
+       POST finale part en arrière-plan avec l'option `keepalive: true` et le header
+       `Content-Type: text/plain;charset=utf-8` (ce qui évite la requête preflight
+       CORS `OPTIONS` que Google Apps Script ne supporte pas).
+
+--------------------------------------------------------------------------------
+4.9. Backend Serverless Google Apps Script & Google Sheets (Newsletter)
+--------------------------------------------------------------------------------
+Fichier concerné : `google_apps_script_newsletter.js`
+
+Ce script transforme un simple fichier Google Sheets en véritable serveur CRM +
+service d'emailing transactionnel :
+
+1. Fonction `setupDatabase()` (lignes 18-159) :
+   - Crée et met en forme automatiquement deux onglets dans le Google Sheet :
+     * Onglet `Users` (8 colonnes avec en-tête violet `#5E5CE6` figé) :
+       1. `ID` (ex: `USR-0001`, généré automatiquement)
+       2. `登録日時` (Date et heure au fuseau `Asia/Tokyo`, format `yyyy-MM-dd HH:mm:ss`)
+       3. `メールアドレス` (Email normalisé en minuscules)
+       4. `名前` (Prénom/Nom de l'inscrit)
+       5. `性別` (`女性` / `男性` / `回答しない`)
+       6. `レベル` (`A1` à `C1`)
+       7. `興味のあるカテゴリー` (Liste séparée par `、`)
+       8. `メール送信状況` (`送信済み (...)` ou détail de l'erreur éventuelle)
+     * Onglet `EmailTemplate` :
+       Permet d'éditer directement dans Google Sheets (colonne B), sans jamais toucher
+       au code HTML ni risquer de casser la mise en page du mail :
+       - Le nom de l'expéditeur (`Furago - フランス語学習`)
+       - L'alias d'expédition éventuel (pour un domaine personnalisé futur)
+       - L'objet du mail (`【Furago】{{名前}}さん、ご登録ありがとうございます！`)
+       - Le titre principal (`Bienvenue sur Furago, {{名前}} !`)
+       - Le corps du texte (avec gestion automatique des paragraphes et sauts de ligne)
+       - Le texte et l'URL du bouton d'action (`https://furago.pages.dev`)
+       - La signature / pied de page.
+
+2. Fonctions `doGet(e)` et `doPost(e)` (lignes 177-295) :
+   - Vérifient via `isEmailAlreadyRegistered(usersSheet, email)` si l'adresse email
+     est déjà présente dans la colonne C de l'onglet `Users`.
+   - Si `data.action === "check_email"`, renvoie uniquement `{"status": "available"}`
+     ou `{"status": "already_exists"}` sans inscrire l'utilisateur.
+   - Lors de l'inscription finale, génère l'ID `USR-XXXX`, appelle `sendWelcomeEmail()`,
+     ajoute la ligne dans `Users` et renvoie `{"status": "ok", "userId": userId}`.
+
+3. Fonction `sendWelcomeEmail(user)` (lignes 300-409) :
+   - Lit les textes configurés dans l'onglet `EmailTemplate`.
+   - Remplace dynamiquement les variables `{{名前}}`, `{{レベル}}` et `{{カテゴリー}}`.
+   - Échappe les caractères HTML sensibles (`escapeHtml`) et transforme les doubles
+     sauts de ligne en paragraphes `<p>` élégants.
+   - Injecte le tout dans un template HTML responsive aux couleurs de Furago (en-tête
+     dégradé violet, encadré récapitulatif du profil d'apprentissage, bouton CTA
+     arrondi) et l'envoie via `GmailApp.sendEmail()`.
+
+================================================================================
+5. SYSTÈME DE DESIGN, UI/UX ET RESPONSIVE (MOBILE & DESKTOP)
+================================================================================
+
+Fichier concerné : `src/app/globals.css`
+
+Le design de Furago s'inspire des standards Apple (iOS / macOS Human Interface
+Guidelines) adaptés au public japonais : clarté, hiérarchie typographique nette,
+ombres douces et transitions fluides.
+
+1. Palette de couleurs (Variables CSS `:root`, lignes 3-18) :
+   - `--bg: #f2f2f7`           : Gris clair iOS apaisant pour les yeux en arrière-plan.
+   - `--surface: #ffffff`      : Blanc pur pour les cartes d'articles et le texte de lecture.
+   - `--primary: #5e5ce6`      : Indigo Furago (couleur identitaire, boutons, badges, liens).
+   - `--primary-light: #e0e0ff`: Indigo pastel pour les badges et états actifs.
+   - `--text-main: #1c1c1e`    : Noir profond adouci pour un contraste de lecture optimal.
+   - `--text-muted: #8e8e93`   : Gris secondaire pour les dates, sous-titres et icônes inactives.
+   - `--green: #34c759`        : Vert de validation (bonnes réponses quiz, toasts, audio).
+   - `--red: #ff3b30`          : Rouge d'erreur (mauvaises réponses quiz, suppression).
+
+2. Mise en page 100 % fluide sans effet "coquille mobile" sur PC :
+   - Contrairement aux anciennes applications mobiles portées sur le web qui affichent
+     un étroit rectangle au milieu de l'écran sur ordinateur, Furago utilise un
+     conteneur `.app-shell` pleine largeur (`width: 100%`).
+   - Le header (`.app-header`) et la barre d'email (`.lead-bar`) s'étendent sur toute
+     la largeur de l'écran tout en alignant leur contenu interne grâce à la formule CSS :
+     `padding: 0 max(16px, calc((100vw - var(--content-max-width)) / 2 + 20px));`
+   - La vue Accueil utilise `--content-max-width: 1020px`, tandis que la vue Lecture
+     utilise `--reading-max-width: 820px` (largeur idéale pour que l'œil humain lise
+     des lignes de texte sans fatigue sur grand écran).
+
+3. Grille d'articles intelligente (Hero + Liste/Grille, lignes 278-360) :
+   - Le tout premier article (le plus récent, `index === 0`) reçoit la classe
+     `.hero-format` : grande image en bandeau supérieur (`190px` de haut sur mobile,
+     `250px` sur PC) et sur PC (`@media (min-width: 700px)`), il occupe toute la
+     largeur de la grille (`grid-column: 1 / -1`).
+   - Les articles suivants reçoivent la classe `.list-format` : vignette carrée à
+     gauche (`106x106px` sur mobile, `130x120px` sur PC) et titre + badges à droite.
+     Sur PC, ils s'organisent automatiquement en grille multi-colonnes fluide via
+     `grid-template-columns: repeat(auto-fill, minmax(380px, 1fr))`.
+
+4. Composants adaptatifs Mobile vs Desktop :
+   - Lecteur Audio (`.audio-panel`, lignes 445-480) :
+     * Sur mobile : Bottom Sheet ancré en bas de l'écran (`border-radius: 24px 24px 0 0`).
+     * Sur PC (`>= 700px`) : Dock flottant centré à `16px` du bas de l'écran, limité à
+       `660px` de large avec les 4 coins arrondis (`border-radius: 20px`).
+   - Modales (`.modal-overlay` & `.modal-sheet`, lignes 835-872) :
+     * Sur mobile : glissent depuis le bas de l'écran (`align-items: flex-end`).
+     * Sur PC (`>= 700px`) : s'affichent au centre de l'écran (`align-items: center`)
+       sous forme de boîte de dialogue élégante.
+
+================================================================================
+6. SEO (RÉFÉRENCEMENT NATUREL), PERFORMANCE ET ACCESSIBILITÉ
+================================================================================
+
+1. Métadonnées et ciblage linguistique (`src/app/layout.tsx`) :
+   - La balise racine `<html lang="ja">` indique à Google et aux navigateurs que le
+     site s'adresse à une audience japonaise.
+   - Titre SEO : `"Furago - フランス語学習・読解＆リスニングアプリ"` (cible les mots-clés
+     majeurs en japonais : apprentissage du français, compréhension écrite, écoute).
+   - Meta Description : présente clairement les niveaux A1〜C1, le dictionnaire en un
+     tap, la traduction contextuelle, l'audio natif et les quiz.
+
+2. Balisage sémantique bilingue (`lang="fr"` dans un document `lang="ja"`) :
+   - Tous les titres d'articles (`<h2 lang="fr">`, `<h3 lang="fr">`), les paragraphes
+     de lecture (`<p lang="fr">`), les mots cliquables et les questions de quiz
+     portent l'attribut explicite `lang="fr"`.
+   - Impact SEO & Accessibilité :
+     * Les moteurs de recherche comprennent qu'il s'agit de contenu pédagogique
+       bilingue franco-japonais légitime (et non d'une page mal traduite).
+     * Les lecteurs d'écran et moteurs vocaux basculent automatiquement sur la
+       prononciation française pour ces éléments.
+     * Les règles typographiques et de césure du navigateur s'adaptent au français.
+
+3. Pré-rendu statique (SSG) et Core Web Vitals :
+   - Grâce à `getArticles()` exécuté lors du `next build` dans `src/app/page.tsx`,
+     le fichier `index.html` généré contient déjà le HTML de tous les articles.
+   - LCP (Largest Contentful Paint) ultra-rapide : aucune police web externe (Google
+     Fonts) ne bloque le rendu initial puisque l'application utilise la pile de
+     polices natives du système (`SF Pro Text`, `Hiragino Sans`, `Yu Gothic`).
+   - CLS (Cumulative Layout Shift) proche de 0 : les conteneurs d'images ont des
+     hauteurs fixes définies en CSS (`190px` / `250px` / `106px`) et le surlignage
+     TTS utilise `box-shadow` pour ne jamais décaler le texte.
+   - INP (Interaction to Next Paint) optimal : le dictionnaire hors-ligne est chargé
+     en RAM et les soumissions de formulaires utilisent l'Optimistic UI (0ms).
+
+================================================================================
+7. COMMENT TOUT EST MANAGÉ AU QUOTIDIEN (ADMINISTRATION)
+================================================================================
+
+Le projet est conçu pour que la gestion quotidienne du contenu et des utilisateurs
+se fasse SANS avoir besoin de modifier le code de l'application web :
+
+1. Gestion des Articles et des Quiz :
+   - Les articles sont centralisés dans le fichier externe :
+     `https://kohaiducode.github.io/furago-data/articles.json`
+   - Structure JSON d'un article dans `articles.json` :
+     ```json
+     {
+       "id": 1,
+       "date": "2026-09-29",
+       "originalTitle": "Titre de référence",
+       "category": "文化",
+       "imageUrl": "https://drive.google.com/file/d/VOTRE_ID_DRIVE/view?usp=sharing",
+       "levels": {
+         "A1": {
+           "title": "Titre adapté A1",
+           "content": "Paragraphe 1...\nParagraphe 2...",
+           "quiz": [
+             {
+               "text": "Question en français ?",
+               "options": { "A": "Choix 1", "B": "Choix 2", "C": "Choix 3", "D": "Choix 4" },
+               "answer": "B"
+             }
+           ]
+         },
+         "A2": { ... },
+         "B1": { ... },
+         "B2": { ... },
+         "C1": { ... }
+       }
+     }
+     ```
+   - Les catégories de filtres dans l'application se mettent à jour automatiquement :
+     si vous ajoutez un article avec une nouvelle catégorie dans `articles.json`,
+     cette catégorie apparaîtra automatiquement dans le filtre "カテゴリー" et dans
+     l'étape 3 de la modale Newsletter !
+
+2. Gestion des Inscrits Newsletter et du Modèle d'Email :
+   - Tout se gère dans votre Google Sheet relié à `google_apps_script_newsletter.js` :
+     * Onglet `Users` : vous y consultez en temps réel la liste des inscrits, leur
+       niveau (`A1` à `C1`), leurs thèmes favoris et la confirmation que le mail de
+       bienvenue est bien parti (`送信済み`).
+     * Onglet `EmailTemplate` : vous pouvez modifier à tout moment la colonne B
+       (objet du mail, texte de bienvenue, lien du bouton, signature). Tout nouvel
+       inscrit recevra immédiatement la nouvelle version du mail, sans toucher au code.
+
+3. Gestion du Dictionnaire Hors-Ligne :
+   - Le fichier `public/assets/dict.json` contient les entrées lexicales hors-ligne.
+   - Les mots très fréquents ou nécessitant une priorité pédagogique particulière
+     sont gérés dans `PRIORITY_LEMMAS` au début de `src/lib/dictionary.ts`.
+
+================================================================================
+8. PROCESSUS DE PUBLICATION ET DE DÉPLOIEMENT (DE A À Z)
+================================================================================
+
+Il existe 3 processus de publication distincts selon ce que vous souhaitez mettre à jour :
+
+--------------------------------------------------------------------------------
+CAS A : Publier un nouvel article (sans toucher au code du site)
+--------------------------------------------------------------------------------
+1. Uploadez l'image de l'article sur Google Drive et autorisez l'accès ("Tous les
+   utilisateurs disposant du lien peuvent consulter").
+2. Ajoutez le nouvel article (avec ses niveaux A1-C1, son lien Drive et son quiz)
+   dans le dépôt `furago-data` (fichier `articles.json`) et poussez-le sur GitHub.
+3. C'est tout ! Grâce au `fetch(DATA_URL)` exécuté côté client au chargement de
+   `FuragoApp.tsx`, tous les visiteurs verront immédiatement le nouvel article en
+   tête de liste (en format Hero).
+   (Optionnel : vous pouvez relancer un build sur Cloudflare Pages / Vercel plus
+   tard si vous souhaitez également mettre à jour le HTML pré-rendu statique).
+
+--------------------------------------------------------------------------------
+CAS B : Modifier et publier le code de l'application Web (`furago-web`)
+--------------------------------------------------------------------------------
+1. Développement et test en local :
+   Ouvrez un terminal dans `c:\Users\81704\Desktop\Code\FuragoWeb` et lancez :
+   ```powershell
+   npm run dev
+   ```
+   Ouvrez `http://localhost:3000` pour vérifier vos modifications en direct.
+
+2. Vérification de la compilation statique (Build Test) :
+   Avant de pousser sur GitHub, vérifiez toujours que le build statique passe sans
+   erreur TypeScript :
+   ```powershell
+   npm run build
+   ```
+   Cette commande génère le dossier statique `out/` contenant le site prêt pour la
+   production.
+
+3. Publication sur GitHub (qui déclenche le déploiement automatique) :
+   ```powershell
+   git status
+   git add .
+   git commit -m "Description claire de votre modification"
+   git push origin main
+   ```
+
+4. Déploiement automatique en production (Cloudflare Pages / Vercel) :
+   - Votre hébergeur (Cloudflare Pages ou Vercel) est connecté à la branche `main`
+     du dépôt GitHub `kohaiducode/furago-web`.
+   - Dès que le `git push origin main` est reçu :
+     * Commande de build exécutée par l'hébergeur : `npm run build`
+     * Dossier de sortie publié (Output directory) : `out`
+   - En 1 à 2 minutes, la nouvelle version est en ligne mondialement sur le CDN.
+
+--------------------------------------------------------------------------------
+CAS C : Mettre à jour le script Google Apps Script de la Newsletter
+--------------------------------------------------------------------------------
+Si vous modifiez le fichier `google_apps_script_newsletter.js` :
+1. Ouvrez votre Google Sheet de la Newsletter > menu「拡張機能」(Extensions) >「Apps Script」.
+2. Remplacez le code par le contenu de `google_apps_script_newsletter.js` et sauvegardez (💾).
+3. Si la structure des colonnes ou le texte par défaut a changé, sélectionnez la
+   fonction `setupDatabase` dans la barre d'outils en haut et cliquez sur「実行」(Exécuter).
+4. Cliquez en haut à droite sur「デプロイ」(Déployer) >「デプロイを管理」(Gérer les déploiements)
+   > icône crayon (Modifier) > choisissez「新バージョン」(Nouvelle version) > cliquez sur「デプロイ」.
+   (En modifiant le déploiement existant vers une "Nouvelle version", l'URL du Web App
+   ne change pas et vous n'avez rien à modifier dans le code de FuragoWeb !).
+
+================================================================================
+FIN DU DOCUMENT EXPLICATIF — FURAGO WEB
+================================================================================
