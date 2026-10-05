@@ -265,6 +265,25 @@ export default function FuragoApp({
   }, []);
 
   // XP State and logic
+
+  const getSeriesInfo = useCallback((article: Article | null | undefined, level: string) => {
+    if (!article || !article.seriesId || typeof article.seriesOrder !== "number") return null;
+
+    const members = articles
+      .filter(a => a.seriesId === article.seriesId && typeof a.seriesOrder === "number" && a.levels && a.levels[level])
+      .sort((a, b) => {
+        if (a.seriesOrder === b.seriesOrder) return String(a.id).localeCompare(String(b.id));
+        return (a.seriesOrder as number) - (b.seriesOrder as number);
+      });
+
+    const currentIndex = members.findIndex(a => a.id === article.id);
+    if (currentIndex === -1) return null;
+
+    const nextEp = currentIndex + 1 < members.length ? members[currentIndex + 1] : null;
+
+    return { members, currentIndex, total: members.length, nextEp };
+  }, [articles]);
+
   const [totalXP, setTotalXP] = useState<number>(0);
 
   const addXP = useCallback((amount: number) => {
@@ -509,14 +528,12 @@ export default function FuragoApp({
 
     if (!isCompleted && progress > 0.05) {
       return { continueArticle: lastOpened, currentSeriesNextEp: null };
-    } else if (lastOpened.seriesId) {
-      const nextEp = articles
-        .filter(a => a.seriesId === lastOpened.seriesId && (a.seriesOrder || 0) > (lastOpened.seriesOrder || 0))
-        .sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0))[0];
-      return { continueArticle: null, currentSeriesNextEp: nextEp || null };
+    } else if (isCompleted && lastOpened.seriesId) {
+      const sInfo = getSeriesInfo(lastOpened, globalLevel);
+      return { continueArticle: null, currentSeriesNextEp: sInfo ? sInfo.nextEp : null };
     }
     return { continueArticle: null, currentSeriesNextEp: null };
-  }, [articles, lastOpenedArticleId, globalLevel, activeView]);
+  }, [articles, lastOpenedArticleId, globalLevel, activeView, getSeriesInfo]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -1331,12 +1348,11 @@ export default function FuragoApp({
   const progressPercent =
     ttsQueue.length > 0 ? ((queueIndex + 1) / ttsQueue.length) * 100 : 0;
 
-  const quizNextEp = (activeView === "reading" && currentArticle?.seriesId) ? articles
-    .filter(a => a.seriesId === currentArticle.seriesId && (a.seriesOrder || 0) > (currentArticle.seriesOrder || 0))
-    .sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0))[0] : null;
+  const quizNextEp = (activeView === "reading" && currentArticle?.seriesId) ? getSeriesInfo(currentArticle, globalLevel)?.nextEp : null;
 
     const renderCompletionScreen = () => {
     const hasQuiz = currentLevelData?.quiz && currentLevelData.quiz.length > 0;
+    const sInfo = getSeriesInfo(currentArticle, globalLevel);
     return (
       <div className="quiz-card fade-in" style={{ textAlign: "center", padding: "32px 24px" }}>
         <h2 style={{ fontSize: "1.5rem", marginBottom: "24px", color: "var(--text-main)", fontWeight: 800 }}>
@@ -1368,13 +1384,13 @@ export default function FuragoApp({
           )}
         </div>
 
-        {currentArticle?.seriesId && (
+        {currentArticle?.seriesId && sInfo && (
           <div style={{ marginBottom: "28px", padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", background: "var(--bg)" }}>
             <p style={{ margin: "0 0 6px 0", fontSize: "0.95rem", color: "var(--primary)", fontWeight: 800 }}>
               {currentArticle.seriesId.replace(/_/g, ' ')}
             </p>
             <p style={{ margin: "0", fontWeight: 700, color: "var(--text-main)" }}>
-              Article {currentArticle.seriesOrder || '?'} / {articles.filter(a => a.seriesId === currentArticle.seriesId).length}
+              Article {sInfo.currentIndex + 1} / {sInfo.total}
             </p>
           </div>
         )}
@@ -1389,8 +1405,9 @@ export default function FuragoApp({
                 次のエピソード
               </button>
             ) : (
-              <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center" }}>
-                🏆 シリーズ完結 (Series Completed)
+              <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center", display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '1.1rem' }}>🏆 シリーズ完了</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>このシリーズのすべてのエピソードを読み終えました。</span>
               </div>
             )
           ) : (
@@ -1827,9 +1844,15 @@ return (
 
           <div className="article-header">
             {currentArticle.seriesId && (
-              <p style={{ margin: "0 0 8px 0", fontSize: "0.95rem", color: "var(--primary)", fontWeight: 800 }}>
-                {currentArticle.seriesId.replace(/_/g, ' ')} • {currentArticle.seriesOrder || '?'} / {articles.filter(a => a.seriesId === currentArticle.seriesId).length}
-              </p>
+              (() => {
+                const sInfo = getSeriesInfo(currentArticle, globalLevel);
+                if (!sInfo) return null;
+                return (
+                  <p style={{ margin: "0 0 8px 0", fontSize: "0.95rem", color: "var(--primary)", fontWeight: 800 }}>
+                    {currentArticle.seriesId.replace(/_/g, ' ')} • {sInfo.currentIndex + 1} / {sInfo.total}
+                  </p>
+                );
+              })()
             )}
             <h2 lang="fr">{typeof currentLevelData.title === "string" ? currentLevelData.title : (currentLevelData.title as any)?.fr}</h2>
             <div
