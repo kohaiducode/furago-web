@@ -135,7 +135,7 @@ export default function FuragoApp({
   initialArticles: Article[];
 }) {
   // Navigation & Views: "home" | "reading" | "words"
-  const [activeView, setActiveView] = useState<"home" | "reading" | "words">("home");
+  const [activeView, setActiveView] = useState<"home" | "reading" | "words" | "vocab_review">("home");
 
   // i18n States
   const [appLang, setAppLang] = useState<AppLanguage>("ja");
@@ -212,13 +212,17 @@ export default function FuragoApp({
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const [lastCompletedDate, setLastCompletedDate] = useState<string>("");
+  const [lastVocabReviewDate, setLastVocabReviewDate] = useState<string>("");
   useEffect(() => {
     const d = localStorage.getItem("furago_daily_completed_date");
     if (d) setLastCompletedDate(d);
+    const v = localStorage.getItem("furago_xp_vocab_date");
+    if (v) setLastVocabReviewDate(v);
   }, []);
 
   const todayStr = new Date().toLocaleDateString("en-CA"); // local timezone YYYY-MM-DD
   const isMissionCompletedToday = lastCompletedDate === todayStr;
+  const isVocabReviewCompletedToday = lastVocabReviewDate === todayStr;
 
   const [currentStreak, setCurrentStreak] = useState<number>(0);
   const [longestStreak, setLongestStreak] = useState<number>(0);
@@ -316,6 +320,45 @@ export default function FuragoApp({
       addXP(10);
     }
   }, [addXP]);
+
+  const checkAndAwardVocabReviewXP = useCallback(() => {
+    const key = "furago_xp_vocab_date";
+    const lastDate = localStorage.getItem(key);
+    const today = new Date().toLocaleDateString("en-CA");
+    if (lastDate !== today) {
+      localStorage.setItem(key, today);
+      setLastVocabReviewDate(today);
+      addXP(10);
+    }
+  }, [addXP]);
+
+  const [vocabReviewIndex, setVocabReviewIndex] = useState(0);
+  const [vocabReviewWords, setVocabReviewWords] = useState<SavedWord[]>([]);
+  const [vocabReviewAnswers, setVocabReviewAnswers] = useState<string[][]>([]);
+  const [vocabReviewSelected, setVocabReviewSelected] = useState<string | null>(null);
+
+  const startVocabReview = () => {
+    if (savedWords.length === 0) return;
+    const shuffled = [...savedWords].sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, 5);
+    
+    const optionsList = selected.map(word => {
+       let others = savedWords.filter(w => w.fr !== word.fr);
+       others = others.sort(() => 0.5 - Math.random());
+       const fakeOptions = others.slice(0, 3).map(w => w.conciseDef || w.ja);
+       while(fakeOptions.length < 3) fakeOptions.push("ダミー" + fakeOptions.length);
+       
+       const options = [...fakeOptions, word.conciseDef || word.ja].sort(() => 0.5 - Math.random());
+       return options;
+    });
+    
+    setVocabReviewWords(selected);
+    setVocabReviewAnswers(optionsList);
+    setVocabReviewIndex(0);
+    setVocabReviewSelected(null);
+    setActiveView("vocab_review");
+    window.scrollTo(0,0);
+  };
 
   useEffect(() => {
     if (activeView === "reading" && currentArticle) {
@@ -1343,6 +1386,24 @@ export default function FuragoApp({
             </div>
           )}
 
+          {savedWords.length > 0 && (
+            <div className="fade-in" style={{ margin: '16px 20px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>🔤 今日の復習</h2>
+                {isVocabReviewCompletedToday && (
+                  <span style={{ background: 'var(--bg)', color: 'var(--text-muted)', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>クリア！</span>
+                )}
+              </div>
+              <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>{Math.min(5, savedWords.length)} mots</p>
+              <button 
+                onClick={startVocabReview}
+                style={{ width: '100%', padding: '14px', borderRadius: '16px', border: 'none', background: isVocabReviewCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isVocabReviewCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+              >
+                {isVocabReviewCompletedToday ? 'もう一度復習する' : 'Réviser'}
+              </button>
+            </div>
+          )}
+
           {filteredArticles.length === 0 ? (
             <p
               style={{
@@ -1714,6 +1775,85 @@ export default function FuragoApp({
                   );
                 })()
               )}
+            </div>
+          )}
+        </main>
+      )}
+
+      {/* VIEW: VOCAB REVIEW */}
+      {activeView === "vocab_review" && vocabReviewWords.length > 0 && (
+        <main className="view fade-in" style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', minHeight: '80vh', justifyContent: 'center' }}>
+          {vocabReviewIndex < vocabReviewWords.length ? (
+            <div className="fade-in">
+              <h2 style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '40px' }}>{vocabReviewIndex + 1} / {vocabReviewWords.length}</h2>
+              <div style={{ textAlign: 'center', margin: '40px 0' }}>
+                <h1 style={{ fontSize: '2.5rem', color: 'var(--text-main)', marginBottom: '20px', fontWeight: 800 }}>{vocabReviewWords[vocabReviewIndex].fr}</h1>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {vocabReviewAnswers[vocabReviewIndex].map((ans, i) => {
+                  const isCorrect = ans === (vocabReviewWords[vocabReviewIndex].conciseDef || vocabReviewWords[vocabReviewIndex].ja);
+                  let bg = "var(--surface)";
+                  let color = "var(--text-main)";
+                  let border = "1px solid var(--border)";
+                  
+                  if (vocabReviewSelected !== null) {
+                    if (isCorrect) {
+                      bg = "rgba(76, 217, 100, 0.1)";
+                      color = "#4cd964";
+                      border = "1px solid #4cd964";
+                    } else if (vocabReviewSelected === ans) {
+                      bg = "rgba(255, 59, 48, 0.1)";
+                      color = "#ff3b30";
+                      border = "1px solid #ff3b30";
+                    }
+                  }
+                  
+                  return (
+                    <button
+                      key={i}
+                      disabled={vocabReviewSelected !== null}
+                      onClick={() => {
+                        setVocabReviewSelected(ans);
+                        setTimeout(() => {
+                          setVocabReviewSelected(null);
+                          setVocabReviewIndex(idx => idx + 1);
+                        }, 1200);
+                      }}
+                      style={{
+                        padding: '16px',
+                        borderRadius: '16px',
+                        background: bg,
+                        color: color,
+                        border: border,
+                        fontSize: '1.05rem',
+                        fontWeight: 700,
+                        cursor: vocabReviewSelected !== null ? 'default' : 'pointer',
+                        textAlign: 'left',
+                        transition: 'all 0.2s',
+                        boxShadow: vocabReviewSelected === null ? '0 2px 8px rgba(0,0,0,0.04)' : 'none'
+                      }}
+                    >
+                      {ans}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="fade-in" style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
+              <div style={{ fontSize: '4rem', marginBottom: '16px' }}>🎉</div>
+              <h1 style={{ fontSize: '1.8rem', marginBottom: '16px', color: 'var(--text-main)' }}>復習完了！</h1>
+              <p style={{ fontSize: '1.1rem', marginBottom: '32px', color: 'var(--text-muted)' }}>よくできました！</p>
+              <button
+                onClick={() => {
+                  checkAndAwardVocabReviewXP();
+                  setActiveView("home");
+                  window.scrollTo(0,0);
+                }}
+                style={{ width: '100%', padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+              >
+                ホームに戻る
+              </button>
             </div>
           )}
         </main>
