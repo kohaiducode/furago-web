@@ -1,8 +1,14 @@
-export interface DictSense {
-  k?: string[];
-  r?: string[];
-  p?: string[];
-  g?: string[];
+export interface FuragoDictEntry {
+  id: string;
+  lemma: string;
+  pos_en: string;
+  pos_ja: string;
+  gender_en: string;
+  gender_ja: string;
+  meaning_ja: string;
+  meaning_en: string;
+  inflections: string[];
+  status: string;
 }
 
 export interface DictLookupResult {
@@ -14,6 +20,8 @@ export interface DictLookupResult {
   traductionPhrase: string;
   nature: string;
   definitions: string[];
+  gender: string;
+  entry?: FuragoDictEntry;
 }
 
 const PRIORITY_LEMMAS: Record<
@@ -474,8 +482,10 @@ export function getShortTargetedContext(paragraphText: string, word: string): st
   return sentence.trim();
 }
 
+
 class DictionaryServiceClass {
-  db: Record<string, DictSense[]> | null = null;
+  dbByLemma: Record<string, FuragoDictEntry> = {};
+  dbByInflection: Record<string, FuragoDictEntry> = {};
   isLoaded = false;
   isLoading = false;
   sentenceCache = new Map<string, string>();
@@ -484,19 +494,32 @@ class DictionaryServiceClass {
     if (this.isLoaded || this.isLoading) return;
     this.isLoading = true;
     try {
-      const res = await fetch("/assets/dict.json");
+      const res = await fetch("https://raw.githubusercontent.com/kohaiducode/furago-data/main/dictionary.json");
       if (res.ok) {
-        this.db = await res.json();
+        const data: FuragoDictEntry[] = await res.json();
+        for (const entry of data) {
+           const lemmaKey = (entry.lemma || "").toLowerCase().trim();
+           if (lemmaKey) this.dbByLemma[lemmaKey] = entry;
+           
+           if (entry.inflections) {
+              for (const inf of entry.inflections) {
+                  const infKey = inf.toLowerCase().trim();
+                  if (infKey && infKey !== lemmaKey) {
+                      this.dbByInflection[infKey] = entry;
+                  }
+              }
+           }
+        }
         this.isLoaded = true;
       }
     } catch (e) {
-      console.error("Failed to load offline dictionary", e);
+      console.error("Failed to load dictionary from GitHub", e);
     } finally {
       this.isLoading = false;
     }
   }
 
-  async lookupWord(word: string, surroundingSentence: string): Promise<DictLookupResult> {
+  async lookupWord(word: string, surroundingSentence: string, appLang: "ja" | "en" = "ja"): Promise<DictLookupResult> {
     if (!this.isLoaded && !this.isLoading) {
       await this.init();
     }
@@ -522,7 +545,8 @@ class DictionaryServiceClass {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 1800);
-          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=fr&tl=ja&dt=t&q=${encodeURIComponent(targetSentence)}`;
+          const targetLang = appLang === "en" ? "en" : "ja";
+          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=fr&tl=${targetLang}&dt=t&q=${encodeURIComponent(targetSentence)}`;
           const res = await fetch(url, { signal: controller.signal });
           clearTimeout(timeoutId);
           if (res.ok) {
@@ -541,140 +565,58 @@ class DictionaryServiceClass {
       }
     }
 
-    const lookupKeys = [cleanWord];
-    if (PRIORITY_LEMMAS[cleanWord]) {
-      const p = PRIORITY_LEMMAS[cleanWord];
-      if (!lookupKeys.includes(p.lemma)) lookupKeys.push(p.lemma);
-    }
-    const candidates = getLemmaCandidates(cleanWord);
-    for (const c of candidates) {
-      if (!lookupKeys.includes(c)) lookupKeys.push(c);
-      if (PRIORITY_LEMMAS[c] && !lookupKeys.includes(PRIORITY_LEMMAS[c].lemma)) {
-        lookupKeys.push(PRIORITY_LEMMAS[c].lemma);
-      }
-    }
-
-    interface CandidateSense {
-      word: string;
-      pos: string;
-      def: string;
-      rawTerms: string[];
-      priority: number;
-    }
-
-    const candidateSenses: CandidateSense[] = [];
-
-    for (const key of lookupKeys) {
-      if (PRIORITY_LEMMAS[key]) {
-        const p = PRIORITY_LEMMAS[key];
-        candidateSenses.push({
-          word: p.lemma,
-          pos: p.pos,
-          def: p.def,
-          rawTerms: p.def.split("、").map((t) => t.replace(/〜/g, "").trim()),
-          priority: key === cleanWord ? 10 : 8,
-        });
-      }
-    }
-
-    if (this.isLoaded && this.db) {
-      for (const key of lookupKeys) {
-        if (this.db[key]) {
-          const entries = this.db[key];
-          const sensesByPos: Record<string, string[]> = {};
-          for (const e of entries) {
-            const term = (
-              e.k && e.k.length > 0
-                ? e.k[0]
-                : e.r && e.r.length > 0
-                  ? e.r[0]
-                  : ""
-            ).trim();
-            const cleanTerm = term.replace(/[\(（].*?[\)）]/g, "").trim();
-            if (!cleanTerm) continue;
-
-            let pos = "単語";
-            if (e.p && e.p.includes("動詞")) pos = "動詞";
-            else if (e.p && e.p.includes("形容詞")) pos = "形容詞";
-            else if (e.p && e.p.length > 0) pos = e.p[0];
-
-            if (pos === "接続詞" && key !== "et" && key !== "mais" && key !== "ou")
-              continue;
-
-            if (!sensesByPos[pos]) sensesByPos[pos] = [];
-            if (!sensesByPos[pos].includes(cleanTerm)) {
-              sensesByPos[pos].push(cleanTerm);
-            }
-          }
-
-          for (const pos in sensesByPos) {
-            const terms = sensesByPos[pos];
-            let posBonus = 0;
-            if (pos === "動詞") posBonus = 3;
-            else if (pos === "形容詞") posBonus = 2;
-            else if (pos === "名詞") posBonus = 1;
-
-            candidateSenses.push({
-              word: key,
-              pos,
-              def: terms.slice(0, 3).join("、"),
-              rawTerms: terms,
-              priority: (key === cleanWord ? 6 : 4) + posBonus,
-            });
-          }
-        }
-      }
-    }
-
-    if (traductionPhrase) {
-      for (const s of candidateSenses) {
-        for (const term of s.rawTerms) {
-          if (term && term.length >= 1 && traductionPhrase.includes(term)) {
-            s.priority += 50;
-            const remaining = s.rawTerms.filter((t) => t !== term);
-            s.def = [term, ...remaining].slice(0, 3).join("、");
-            break;
-          }
-        }
-      }
-    }
-
-    candidateSenses.sort((a, b) => b.priority - a.priority);
-
-    const uniqueSenses: CandidateSense[] = [];
-    const seenDefs = new Set<string>();
-    for (const s of candidateSenses) {
-      if (!seenDefs.has(s.def)) {
-        seenDefs.add(s.def);
-        uniqueSenses.push(s);
+    let matchedEntry: FuragoDictEntry | null = null;
+    let matchedWord = cleanWord;
+    
+    // Check custom priority lemmas first if not found in db? Or db first?
+    // Let's use the DB first
+    if (this.isLoaded) {
+      if (this.dbByLemma[cleanWord]) {
+        matchedEntry = this.dbByLemma[cleanWord];
+        matchedWord = matchedEntry.lemma;
+      } else if (this.dbByInflection[cleanWord]) {
+        matchedEntry = this.dbByInflection[cleanWord];
+        matchedWord = matchedEntry.lemma;
       }
     }
 
     let conciseDef = "";
     let nature = "単語";
-    let matchedWord = cleanWord;
+    let gender = "";
 
-    if (uniqueSenses.length === 1) {
-      conciseDef = uniqueSenses[0].def;
-      nature = uniqueSenses[0].pos;
-      matchedWord = uniqueSenses[0].word;
-    } else if (uniqueSenses.length > 1) {
-      const s1 = uniqueSenses[0];
-      const s2 = uniqueSenses[1];
-      const p1 = s1.pos === "形容詞" ? "形" : s1.pos === "動詞" ? "動" : s1.pos === "名詞" ? "名" : s1.pos;
-      const p2 = s2.pos === "形容詞" ? "形" : s2.pos === "動詞" ? "動" : s2.pos === "名詞" ? "名" : s2.pos;
-
-      if (s1.pos !== s2.pos || s1.priority >= 50) {
-        conciseDef = `${s1.def}（${p1}）/ ${s2.def}（${p2}）`;
-      } else {
-        conciseDef = s1.def;
-      }
-      nature = s1.pos;
-      matchedWord = s1.word;
+    if (matchedEntry) {
+       conciseDef = appLang === "en" ? matchedEntry.meaning_en : matchedEntry.meaning_ja;
+       nature = appLang === "en" ? matchedEntry.pos_en : matchedEntry.pos_ja;
+       const rawGender = appLang === "en" ? matchedEntry.gender_en : matchedEntry.gender_ja;
+       gender = rawGender === "-" ? "" : rawGender;
+    } else {
+       // Fallback to priority lemmas if not in DB
+       if (PRIORITY_LEMMAS[cleanWord]) {
+           const p = PRIORITY_LEMMAS[cleanWord];
+           matchedWord = p.lemma;
+           nature = p.pos;
+           conciseDef = p.def; // These are currently JA only, but that's a fallback.
+       } else {
+           // Try candidate heuristics (e.g. drop 's', 'e')
+           const candidates = getLemmaCandidates(cleanWord);
+           for (const c of candidates) {
+               if (this.isLoaded && this.dbByLemma[c]) {
+                   matchedEntry = this.dbByLemma[c];
+                   matchedWord = matchedEntry.lemma;
+                   break;
+               }
+           }
+           if (matchedEntry) {
+               conciseDef = appLang === "en" ? matchedEntry.meaning_en : matchedEntry.meaning_ja;
+               nature = appLang === "en" ? matchedEntry.pos_en : matchedEntry.pos_ja;
+               const rawGender = appLang === "en" ? matchedEntry.gender_en : matchedEntry.gender_ja;
+               gender = rawGender === "-" ? "" : rawGender;
+           }
+       }
     }
 
     if (!traductionPhrase) {
-      traductionPhrase = conciseDef ? conciseDef : "（文脈翻訳なし）";
+      traductionPhrase = conciseDef ? conciseDef : (appLang === "en" ? "(No context translation)" : "（文脈翻訳なし）");
     }
 
     return {
@@ -685,9 +627,12 @@ class DictionaryServiceClass {
       phraseOriginale: targetSentence,
       traductionPhrase,
       nature,
-      definitions: [conciseDef].filter(Boolean),
+      gender,
+      definitions: conciseDef ? conciseDef.split("、") : [],
+      entry: matchedEntry || undefined
     };
   }
 }
+
 
 export const DictionaryService = new DictionaryServiceClass();

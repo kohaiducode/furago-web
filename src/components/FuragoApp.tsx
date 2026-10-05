@@ -71,6 +71,7 @@ interface SavedWord {
   ja: string;
   conciseDef?: string;
   nature?: string;
+  gender?: string;
   phraseOriginale?: string;
   traductionPhrase?: string;
   definitions?: string[];
@@ -834,7 +835,7 @@ export default function FuragoApp({
     setDictLoading(true);
     setDictData(null);
 
-    const result = await DictionaryService.lookupWord(clean, paragraphText);
+    const result = await DictionaryService.lookupWord(clean, paragraphText, appLang as "ja" | "en");
     setDictData(result);
     setDictLoading(false);
   };
@@ -885,6 +886,7 @@ export default function FuragoApp({
       ja: dictData.traductionPhrase,
       conciseDef: dictData.conciseDef,
       nature: dictData.nature,
+      gender: dictData.gender,
       phraseOriginale: dictData.phraseOriginale,
       traductionPhrase: dictData.traductionPhrase,
       definitions: dictData.definitions,
@@ -2188,7 +2190,7 @@ export default function FuragoApp({
                               display: "inline-block",
                             }}
                           >
-                            {word.nature}
+                            {word.nature}{word.gender && ` · ${word.gender}`}
                           </span>
                         )}
                           <h3
@@ -2323,7 +2325,7 @@ export default function FuragoApp({
                 )}
               </span>
               {dictData?.nature && (
-                <span className="dict-nature-tag">{dictData.nature}</span>
+                <span className="dict-nature-tag">{dictData.nature}{dictData.gender && ` · ${dictData.gender}`}</span>
               )}
             </div>
             <div className="dict-buttons">
