@@ -34,6 +34,7 @@ export interface UserState {
   dailyMissionXPDate: string; // previously furago_xp_daily_date
   vocabReviewXPDate: string; // previously furago_xp_vocab_date
   lastOpenedArticleId: string; // previously furago_last_opened_articleId
+  articleProgress: Record<string, number>;
 }
 
 const STATE_KEY = "furago:user-state:v1";
@@ -57,6 +58,7 @@ const DEFAULT_STATE: UserState = {
   dailyMissionXPDate: "",
   vocabReviewXPDate: "",
   lastOpenedArticleId: "",
+  articleProgress: {},
 };
 
 export const loadUserState = (): UserState => {

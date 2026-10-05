@@ -278,12 +278,25 @@ export default function FuragoApp({
   const checkAndAwardArticleXP = useCallback((articleId: string) => {
     const state = loadUserState();
     const done = [...state.completedArticles];
+    const progressKey = `${articleId}::${globalLevel}`;
+    const newProgress = { ...state.articleProgress };
+    let shouldUpdate = false;
+    
+    if (newProgress[progressKey] !== undefined) {
+      delete newProgress[progressKey];
+      shouldUpdate = true;
+    }
+
     if (!done.includes(articleId)) {
       done.push(articleId);
-      updateUserState({ completedArticles: done });
       addXP(20);
+      shouldUpdate = true;
     }
-  }, [addXP]);
+    
+    if (shouldUpdate) {
+      updateUserState({ completedArticles: done, articleProgress: newProgress });
+    }
+  }, [addXP, globalLevel]);
 
   const checkAndAwardQuizXP = useCallback((articleId: string, isPerfect: boolean) => {
     const state = loadUserState();
@@ -372,6 +385,62 @@ export default function FuragoApp({
     return pool[index];
   }, [articles, globalLevel, todayStr]);
 
+
+  // --- Reading Progress Tracking & Restoration ---
+  useEffect(() => {
+    if (activeView !== "reading" || !currentArticle) return;
+
+    const progressKey = `${currentArticle.id}::${globalLevel}`;
+    const state = loadUserState();
+    const savedRatio = state.articleProgress?.[progressKey];
+
+    // Restore position after initial render
+    let restoreTimeout: NodeJS.Timeout;
+    if (savedRatio && savedRatio > 0 && savedRatio <= 1) {
+      restoreTimeout = setTimeout(() => {
+        const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+        if (scrollHeight > 0) {
+          window.scrollTo({ top: scrollHeight * savedRatio, behavior: "instant" });
+        }
+      }, 150); // slight delay to allow images/layout to settle
+    } else {
+      window.scrollTo({ top: 0, behavior: "instant" });
+    }
+
+    // Scroll listener to save position
+    let scrollTimeout: NodeJS.Timeout;
+    const handleScroll = () => {
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+        if (scrollHeight <= 0) return;
+        
+        let ratio = window.scrollY / scrollHeight;
+        if (ratio < 0) ratio = 0;
+        if (ratio > 1) ratio = 1;
+
+        // Only save if meaningful movement (e.g., beyond the top 5% or restoring)
+        if (ratio > 0.05 || ratio === 0) {
+          const currentState = loadUserState();
+          updateUserState({
+            articleProgress: {
+              ...currentState.articleProgress,
+              [progressKey]: ratio
+            }
+          });
+        }
+      }, 500); // Debounce saves
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      if (restoreTimeout) clearTimeout(restoreTimeout);
+    };
+  }, [activeView, currentArticle, globalLevel]);
+
   useEffect(() => {
     if (activeView === "reading" && currentArticle) {
       const q = currentArticle.levels[globalLevel]?.quiz;
@@ -403,10 +472,12 @@ export default function FuragoApp({
     const lastOpened = articles.find(a => a.id.toString() === lastOpenedArticleId && a.levels && a.levels[globalLevel]);
     if (!lastOpened) return { continueArticle: null, currentSeriesNextEp: null };
 
-    const done = typeof window !== "undefined" ? loadUserState().completedArticles : [];
+    const state = typeof window !== "undefined" ? loadUserState() : null;
+    const done = state?.completedArticles || [];
     const isCompleted = done.includes(lastOpened.id.toString());
+    const progress = state?.articleProgress?.[`${lastOpened.id}::${globalLevel}`] || 0;
 
-    if (!isCompleted) {
+    if (!isCompleted && progress > 0.05) {
       return { continueArticle: lastOpened, currentSeriesNextEp: null };
     } else if (lastOpened.seriesId) {
       const nextEp = articles
@@ -415,7 +486,7 @@ export default function FuragoApp({
       return { continueArticle: null, currentSeriesNextEp: nextEp || null };
     }
     return { continueArticle: null, currentSeriesNextEp: null };
-  }, [articles, lastOpenedArticleId, globalLevel]);
+  }, [articles, lastOpenedArticleId, globalLevel, activeView]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -766,7 +837,7 @@ export default function FuragoApp({
     // Removed early daily mission completion
     }
     setActiveView("reading");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // handled by reading progress effect
   };
 
   // Position Dictionary Popup whenever dictRect or dictData updates
