@@ -11,7 +11,7 @@ async function getArticles(): Promise<Article[]> {
     const valid: Article[] = (data.articles || []).filter(
       (a: Article) => a.levels && Object.keys(a.levels).length > 0
     );
-    valid.sort((a: any, b: any) => {
+    valid.sort((a: Article, b: Article) => {
       const dA = a.date ? new Date(a.date).getTime() : 0;
       const dB = b.date ? new Date(b.date).getTime() : 0;
       return dB - dA;
