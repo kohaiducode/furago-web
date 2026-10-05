@@ -175,6 +175,7 @@ export default function FuragoApp({
   const [frVoices, setFrVoices] = useState<{ voice: SpeechSynthesisVoice; label: string }[]>([]);
   const [selectedVoiceIdx, setSelectedVoiceIdx] = useState<number>(0);
 
+  const quizTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isPlayingRef = useRef(false);
   const isPausedRef = useRef(false);
   const queueIndexRef = useRef(0);
@@ -868,6 +869,10 @@ export default function FuragoApp({
 
   // Open an article
   const openArticle = (article: Article) => {
+    if (quizTimerRef.current) {
+      clearTimeout(quizTimerRef.current);
+      quizTimerRef.current = null;
+    }
     stopAudio();
     setDictOpen(false);
     setCurrentArticle(article);
@@ -887,6 +892,14 @@ export default function FuragoApp({
     setActiveView("reading");
     // handled by reading progress effect
   };
+
+  // Safety cleanup for quiz timer
+  useEffect(() => {
+    if (activeView !== "reading" && quizTimerRef.current) {
+      clearTimeout(quizTimerRef.current);
+      quizTimerRef.current = null;
+    }
+  }, [activeView]);
 
   // Position Dictionary Popup whenever dictRect or dictData updates
   useEffect(() => {
@@ -2003,10 +2016,18 @@ return (
                               if (isCorrectOption) {
                                 setQuizScore((s) => s + 1);
                               }
-                              setTimeout(() => {
+                              
+                              if (quizTimerRef.current) {
+                                clearTimeout(quizTimerRef.current);
+                              }
+                              
+                              const delay = isCorrectOption ? 1700 : 3500;
+                              
+                              quizTimerRef.current = setTimeout(() => {
                                 setSelectedAnswer(null);
                                 setQuizIndex((idx) => idx + 1);
-                              }, 1700);
+                                quizTimerRef.current = null;
+                              }, delay);
                             }}
                             style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
                           >
