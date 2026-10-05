@@ -213,11 +213,14 @@ export default function FuragoApp({
 
   const [lastCompletedDate, setLastCompletedDate] = useState<string>("");
   const [lastVocabReviewDate, setLastVocabReviewDate] = useState<string>("");
+  const [lastOpenedArticleId, setLastOpenedArticleId] = useState<string>("");
   useEffect(() => {
     const d = localStorage.getItem("furago_daily_completed_date");
     if (d) setLastCompletedDate(d);
     const v = localStorage.getItem("furago_xp_vocab_date");
     if (v) setLastVocabReviewDate(v);
+    const opened = localStorage.getItem("furago_last_opened_articleId");
+    if (opened) setLastOpenedArticleId(opened);
   }, []);
 
   const todayStr = new Date().toLocaleDateString("en-CA"); // local timezone YYYY-MM-DD
@@ -384,6 +387,25 @@ export default function FuragoApp({
     const index = Math.abs(Math.floor(seed)) % pool.length;
     return pool[index];
   }, [articles, globalLevel, todayStr]);
+
+  const { continueArticle, currentSeriesNextEp } = React.useMemo(() => {
+    if (!lastOpenedArticleId) return { continueArticle: null, currentSeriesNextEp: null };
+    const lastOpened = articles.find(a => a.id.toString() === lastOpenedArticleId && a.levels && a.levels[globalLevel]);
+    if (!lastOpened) return { continueArticle: null, currentSeriesNextEp: null };
+
+    const done = JSON.parse(typeof window !== "undefined" ? localStorage.getItem("furago_xp_articles") || "[]" : "[]");
+    const isCompleted = done.includes(lastOpened.id.toString());
+
+    if (!isCompleted) {
+      return { continueArticle: lastOpened, currentSeriesNextEp: null };
+    } else if (lastOpened.seriesId) {
+      const nextEp = articles
+        .filter(a => a.seriesId === lastOpened.seriesId && (a.seriesOrder || 0) > (lastOpened.seriesOrder || 0))
+        .sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0))[0];
+      return { continueArticle: null, currentSeriesNextEp: nextEp || null };
+    }
+    return { continueArticle: null, currentSeriesNextEp: null };
+  }, [articles, lastOpenedArticleId, globalLevel]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -724,6 +746,8 @@ export default function FuragoApp({
     stopAudio();
     setDictOpen(false);
     setCurrentArticle(article);
+    setLastOpenedArticleId(article.id.toString());
+    localStorage.setItem("furago_last_opened_articleId", article.id.toString());
     setQuizIndex(0);
     setQuizScore(0);
     setSelectedAnswer(null);
@@ -1359,57 +1383,136 @@ export default function FuragoApp({
             </button>
           </div>
 
-          {dailyArticle && (
-            <div className="fade-in" style={{ margin: '16px 20px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--primary)', fontWeight: 800 }}>今日のミッション</h2>
-                {isMissionCompletedToday && (
-                  <span style={{ background: '#4cd964', color: 'white', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>クリア！</span>
-                )}
-              </div>
-              <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                {dailyArticle.imageUrl && (
-                  <div style={{ width: '80px', height: '80px', borderRadius: '16px', overflow: 'hidden', flexShrink: 0 }}>
-                    <img src={formatDriveUrl(dailyArticle.imageUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  </div>
-                )}
-                <div style={{ flex: 1 }}>
-                  <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
-                    {typeof dailyArticle.levels[globalLevel]?.title === 'string' 
-                       ? dailyArticle.levels[globalLevel]?.title 
-                       : (dailyArticle.levels[globalLevel]?.title as TranslatableText)?.fr || dailyArticle.originalTitle}
-                  </h3>
-                  <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
-                    {globalLevel.replace('LVL_', 'Level ')} · 5 min
-                  </p>
-                </div>
-              </div>
-              <button 
-                onClick={() => openArticle(dailyArticle)}
-                style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: isMissionCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isMissionCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-              >
-                {isMissionCompletedToday ? '復習する' : '読む'}
-              </button>
-            </div>
-          )}
+          <div style={{ padding: '20px 20px 0' }}>
+            <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '4px' }}>
+              今日やること
+            </h1>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', fontWeight: 600, marginBottom: '24px' }}>
+              What should I do today?
+            </p>
 
-          {savedWords.length > 0 && (
-            <div className="fade-in" style={{ margin: '16px 20px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>🔤 今日の復習</h2>
-                {isVocabReviewCompletedToday && (
-                  <span style={{ background: 'var(--bg)', color: 'var(--text-muted)', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>クリア！</span>
-                )}
+            {/* Priority 1: Continue reading */}
+            {continueArticle && (
+              <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--primary)', fontWeight: 800 }}>続きを読む</h2>
+                </div>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                  {continueArticle.imageUrl && (
+                    <div style={{ width: '80px', height: '80px', borderRadius: '16px', overflow: 'hidden', flexShrink: 0 }}>
+                      <img src={formatDriveUrl(continueArticle.imageUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
+                      {typeof continueArticle.levels[globalLevel]?.title === 'string' 
+                         ? continueArticle.levels[globalLevel]?.title 
+                         : (continueArticle.levels[globalLevel]?.title as any)?.fr || continueArticle.originalTitle}
+                    </h3>
+                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
+                      {globalLevel.replace('LVL_', 'Level ')}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => openArticle(continueArticle)}
+                  style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                >
+                  続きを読む
+                </button>
               </div>
-              <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>{Math.min(5, savedWords.length)} mots</p>
-              <button 
-                onClick={startVocabReview}
-                style={{ width: '100%', padding: '14px', borderRadius: '16px', border: 'none', background: isVocabReviewCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isVocabReviewCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-              >
-                {isVocabReviewCompletedToday ? 'もう一度復習する' : 'Réviser'}
-              </button>
-            </div>
-          )}
+            )}
+
+            {/* Priority 2: Today's mission */}
+            {dailyArticle && (
+              <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>今日のミッション</h2>
+                  {isMissionCompletedToday && (
+                    <span style={{ background: '#4cd964', color: 'white', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>クリア！</span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                  {dailyArticle.imageUrl && (
+                    <div style={{ width: '80px', height: '80px', borderRadius: '16px', overflow: 'hidden', flexShrink: 0 }}>
+                      <img src={formatDriveUrl(dailyArticle.imageUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
+                      {typeof dailyArticle.levels[globalLevel]?.title === 'string' 
+                         ? dailyArticle.levels[globalLevel]?.title 
+                         : (dailyArticle.levels[globalLevel]?.title as any)?.fr || dailyArticle.originalTitle}
+                    </h3>
+                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
+                      {globalLevel.replace('LVL_', 'Level ')} · 5 min
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => openArticle(dailyArticle)}
+                  style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: isMissionCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isMissionCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                >
+                  {isMissionCompletedToday ? '復習する' : '読む'}
+                </button>
+              </div>
+            )}
+
+            {/* Priority 4: Vocabulary review */}
+            {savedWords.length > 0 && (
+              <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>🔤 今日の復習</h2>
+                  {isVocabReviewCompletedToday && (
+                    <span style={{ background: 'var(--bg)', color: 'var(--text-muted)', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>クリア！</span>
+                  )}
+                </div>
+                <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>{Math.min(5, savedWords.length)} mots</p>
+                <button 
+                  onClick={startVocabReview}
+                  style={{ width: '100%', padding: '14px', borderRadius: '16px', border: 'none', background: isVocabReviewCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isVocabReviewCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                >
+                  {isVocabReviewCompletedToday ? 'もう一度復習する' : 'Réviser'}
+                </button>
+              </div>
+            )}
+
+            {/* Priority 5: Current series */}
+            {currentSeriesNextEp && (
+              <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>📚 {currentSeriesNextEp.seriesId?.replace(/_/g, ' ')}</h2>
+                </div>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                  {currentSeriesNextEp.imageUrl && (
+                    <div style={{ width: '80px', height: '80px', borderRadius: '16px', overflow: 'hidden', flexShrink: 0 }}>
+                      <img src={formatDriveUrl(currentSeriesNextEp.imageUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
+                      {typeof currentSeriesNextEp.levels[globalLevel]?.title === 'string' 
+                         ? currentSeriesNextEp.levels[globalLevel]?.title 
+                         : (currentSeriesNextEp.levels[globalLevel]?.title as any)?.fr || currentSeriesNextEp.originalTitle}
+                    </h3>
+                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
+                      Episode {currentSeriesNextEp.seriesOrder || '?'}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => openArticle(currentSeriesNextEp)}
+                  style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                >
+                  次のエピソード
+                </button>
+              </div>
+            )}
+
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)', marginTop: '32px', marginBottom: '16px' }}>
+              新着・おすすめ
+            </h2>
+          </div>
 
           {filteredArticles.length === 0 ? (
             <p
