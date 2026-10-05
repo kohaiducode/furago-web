@@ -351,18 +351,48 @@ export default function FuragoApp({
   const [vocabReviewSelected, setVocabReviewSelected] = useState<string | null>(null);
 
   const startVocabReview = () => {
-    if (savedWords.length === 0) return;
+    if (savedWords.length === 0) {
+      setVocabReviewWords([]);
+      setVocabReviewAnswers([]);
+      setVocabReviewIndex(0);
+      setVocabReviewSelected(null);
+      setActiveView("vocab_review");
+      window.scrollTo(0,0);
+      return;
+    }
+
     const shuffled = [...savedWords].sort(() => 0.5 - Math.random());
-    const selected = shuffled.slice(0, 5);
+    
+    // Avoid selecting the exact same French word more than once in one review session
+    const uniqueFrSelected: import("../lib/userState").SavedWord[] = [];
+    const seenFr = new Set<string>();
+    for (const w of shuffled) {
+      if (!seenFr.has(w.fr)) {
+        seenFr.add(w.fr);
+        uniqueFrSelected.push(w);
+      }
+      if (uniqueFrSelected.length === 5) break;
+    }
+    const selected = uniqueFrSelected;
+
+    const allMeanings = Array.from(new Set(savedWords.map(w => w.conciseDef || w.ja).filter(Boolean)));
     
     const optionsList = selected.map(word => {
-       let others = savedWords.filter(w => w.fr !== word.fr);
-       others = others.sort(() => 0.5 - Math.random());
-       const fakeOptions = others.slice(0, 3).map(w => w.conciseDef || w.ja);
-       while(fakeOptions.length < 3) fakeOptions.push("ダミー" + fakeOptions.length);
+       const correctMeaning = word.conciseDef || word.ja;
+       let choices: string[] = [];
        
-       const options = [...fakeOptions, word.conciseDef || word.ja].sort(() => 0.5 - Math.random());
-       return options;
+       if (allMeanings.length <= 1) {
+         choices = [];
+       } else if (allMeanings.length <= 3) {
+         choices = [...allMeanings];
+       } else {
+         const others = allMeanings.filter(m => m !== correctMeaning);
+         others.sort(() => 0.5 - Math.random());
+         choices = [correctMeaning, ...others.slice(0, 3)];
+       }
+       
+       choices.sort(() => 0.5 - Math.random());
+       return choices;
     });
     
     setVocabReviewWords(selected);
@@ -1997,63 +2027,95 @@ return (
       )}
 
       {/* VIEW: VOCAB REVIEW */}
-      {activeView === "vocab_review" && vocabReviewWords.length > 0 && (
+      {activeView === "vocab_review" && (
         <main className="view fade-in" style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', minHeight: '80vh', justifyContent: 'center' }}>
-          {vocabReviewIndex < vocabReviewWords.length ? (
+          {vocabReviewWords.length === 0 ? (
+            <div className="fade-in" style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
+              <div style={{ fontSize: '4rem', marginBottom: '16px' }}>📚</div>
+              <h1 style={{ fontSize: '1.5rem', marginBottom: '16px', color: 'var(--text-main)' }}>まだ復習する単語がありません</h1>
+              <p style={{ fontSize: '1.05rem', marginBottom: '32px', color: 'var(--text-muted)' }}>記事を読んで、新しい単語を保存しましょう。</p>
+              <button
+                onClick={() => {
+                  setActiveView("home");
+                  window.scrollTo(0,0);
+                }}
+                style={{ width: '100%', padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+              >
+                ホームに戻る
+              </button>
+            </div>
+          ) : vocabReviewIndex < vocabReviewWords.length ? (
             <div className="fade-in">
               <h2 style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '40px' }}>{vocabReviewIndex + 1} / {vocabReviewWords.length}</h2>
               <div style={{ textAlign: 'center', margin: '40px 0' }}>
                 <h1 style={{ fontSize: '2.5rem', color: 'var(--text-main)', marginBottom: '20px', fontWeight: 800 }}>{vocabReviewWords[vocabReviewIndex].fr}</h1>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {vocabReviewAnswers[vocabReviewIndex].map((ans, i) => {
-                  const isCorrect = ans === (vocabReviewWords[vocabReviewIndex].conciseDef || vocabReviewWords[vocabReviewIndex].ja);
-                  let bg = "var(--surface)";
-                  let color = "var(--text-main)";
-                  let border = "1px solid var(--border)";
-                  
-                  if (vocabReviewSelected !== null) {
-                    if (isCorrect) {
-                      bg = "rgba(76, 217, 100, 0.1)";
-                      color = "#4cd964";
-                      border = "1px solid #4cd964";
-                    } else if (vocabReviewSelected === ans) {
-                      bg = "rgba(255, 59, 48, 0.1)";
-                      color = "#ff3b30";
-                      border = "1px solid #ff3b30";
+              {vocabReviewAnswers[vocabReviewIndex].length === 0 ? (
+                <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--surface)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border)', textAlign: 'center' }}>
+                  <p style={{ fontSize: '1.05rem', color: 'var(--text-muted)', marginBottom: '16px' }}>この単語の意味を確認しましょう</p>
+                  <div style={{ fontSize: '1.5rem', color: 'var(--primary)', fontWeight: 700, marginBottom: '32px' }}>
+                    {vocabReviewWords[vocabReviewIndex].conciseDef || vocabReviewWords[vocabReviewIndex].ja}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setVocabReviewIndex(idx => idx + 1);
+                    }}
+                    style={{ padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+                  >
+                    覚えた
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {vocabReviewAnswers[vocabReviewIndex].map((ans, i) => {
+                    const isCorrect = ans === (vocabReviewWords[vocabReviewIndex].conciseDef || vocabReviewWords[vocabReviewIndex].ja);
+                    let bg = "var(--surface)";
+                    let color = "var(--text-main)";
+                    let border = "1px solid var(--border)";
+                    
+                    if (vocabReviewSelected !== null) {
+                      if (isCorrect) {
+                        bg = "rgba(76, 217, 100, 0.1)";
+                        color = "#4cd964";
+                        border = "1px solid #4cd964";
+                      } else if (vocabReviewSelected === ans) {
+                        bg = "rgba(255, 59, 48, 0.1)";
+                        color = "#ff3b30";
+                        border = "1px solid #ff3b30";
+                      }
                     }
-                  }
-                  
-                  return (
-                    <button
-                      key={i}
-                      disabled={vocabReviewSelected !== null}
-                      onClick={() => {
-                        setVocabReviewSelected(ans);
-                        setTimeout(() => {
-                          setVocabReviewSelected(null);
-                          setVocabReviewIndex(idx => idx + 1);
-                        }, 1200);
-                      }}
-                      style={{
-                        padding: '16px',
-                        borderRadius: '16px',
-                        background: bg,
-                        color: color,
-                        border: border,
-                        fontSize: '1.05rem',
-                        fontWeight: 700,
-                        cursor: vocabReviewSelected !== null ? 'default' : 'pointer',
-                        textAlign: 'left',
-                        transition: 'all 0.2s',
-                        boxShadow: vocabReviewSelected === null ? '0 2px 8px rgba(0,0,0,0.04)' : 'none'
-                      }}
-                    >
-                      {ans}
-                    </button>
-                  );
-                })}
-              </div>
+                    
+                    return (
+                      <button
+                        key={i}
+                        disabled={vocabReviewSelected !== null}
+                        onClick={() => {
+                          setVocabReviewSelected(ans);
+                          setTimeout(() => {
+                            setVocabReviewSelected(null);
+                            setVocabReviewIndex(idx => idx + 1);
+                          }, 1200);
+                        }}
+                        style={{
+                          padding: '16px',
+                          borderRadius: '16px',
+                          background: bg,
+                          color: color,
+                          border: border,
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          cursor: vocabReviewSelected !== null ? 'default' : 'pointer',
+                          textAlign: 'left',
+                          transition: 'all 0.2s',
+                          boxShadow: vocabReviewSelected === null ? '0 2px 8px rgba(0,0,0,0.04)' : 'none'
+                        }}
+                      >
+                        {ans}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ) : (
             <div className="fade-in" style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
