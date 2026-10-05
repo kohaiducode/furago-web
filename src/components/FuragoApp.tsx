@@ -158,6 +158,7 @@ export default function FuragoApp({
   // Quiz State
   const [quizIndex, setQuizIndex] = useState<number>(0);
   const [quizScore, setQuizScore] = useState<number>(0);
+  const [noQuizCompleted, setNoQuizCompleted] = useState<boolean>(false);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
 
   // Audio / TTS State
@@ -364,19 +365,6 @@ export default function FuragoApp({
     window.scrollTo(0,0);
   };
 
-  useEffect(() => {
-    if (activeView === "reading" && currentArticle) {
-      const q = currentArticle.levels[globalLevel]?.quiz;
-      if (!q || q.length === 0) {
-        updateStreak();
-        checkAndAwardArticleXP(currentArticle.id.toString());
-      } else if (quizIndex >= q.length) {
-        updateStreak();
-        checkAndAwardArticleXP(currentArticle.id.toString());
-        checkAndAwardQuizXP(currentArticle.id.toString(), quizScore === q.length);
-      }
-    }
-  }, [activeView, currentArticle, globalLevel, quizIndex, quizScore, updateStreak, checkAndAwardArticleXP, checkAndAwardQuizXP]);
 
   const dailyArticle = React.useMemo(() => {
     const available = articles.filter(a => a.levels && a.levels[globalLevel]);
@@ -388,6 +376,32 @@ export default function FuragoApp({
     const index = Math.abs(Math.floor(seed)) % pool.length;
     return pool[index];
   }, [articles, globalLevel, todayStr]);
+
+  useEffect(() => {
+    if (activeView === "reading" && currentArticle) {
+      const q = currentArticle.levels[globalLevel]?.quiz;
+      if (!q || q.length === 0) {
+        if (noQuizCompleted) {
+          updateStreak();
+          checkAndAwardArticleXP(currentArticle.id.toString());
+          if (dailyArticle && currentArticle.id === dailyArticle.id) {
+            localStorage.setItem("furago_daily_completed_date", todayStr);
+            setLastCompletedDate(todayStr);
+            checkAndAwardDailyMissionXP();
+          }
+        }
+      } else if (quizIndex >= q.length) {
+        updateStreak();
+        checkAndAwardArticleXP(currentArticle.id.toString());
+        checkAndAwardQuizXP(currentArticle.id.toString(), quizScore === q.length);
+        if (dailyArticle && currentArticle.id === dailyArticle.id) {
+          localStorage.setItem("furago_daily_completed_date", todayStr);
+          setLastCompletedDate(todayStr);
+          checkAndAwardDailyMissionXP();
+        }
+      }
+    }
+  }, [activeView, currentArticle, globalLevel, quizIndex, quizScore, updateStreak, checkAndAwardArticleXP, checkAndAwardQuizXP, noQuizCompleted, dailyArticle, todayStr, checkAndAwardDailyMissionXP]);
 
   const { continueArticle, currentSeriesNextEp } = React.useMemo(() => {
     if (!lastOpenedArticleId) return { continueArticle: null, currentSeriesNextEp: null };
@@ -751,15 +765,14 @@ export default function FuragoApp({
     localStorage.setItem("furago_last_opened_articleId", article.id.toString());
     setQuizIndex(0);
     setQuizScore(0);
+    setNoQuizCompleted(false);
     setSelectedAnswer(null);
     const levelData = article.levels[globalLevel];
     if (levelData) {
       buildQueueForText((levelData.paragraphs || levelData.segments || []));
     }
     if (dailyArticle && article.id === dailyArticle.id) {
-       localStorage.setItem("furago_daily_completed_date", todayStr);
-       setLastCompletedDate(todayStr);
-       checkAndAwardDailyMissionXP();
+    // Removed early daily mission completion
     }
     setActiveView("reading");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1230,7 +1243,90 @@ export default function FuragoApp({
     .filter(a => a.seriesId === currentArticle.seriesId && (a.seriesOrder || 0) > (currentArticle.seriesOrder || 0))
     .sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0))[0] : null;
 
-  return (
+    const renderCompletionScreen = () => {
+    const hasQuiz = currentLevelData?.quiz && currentLevelData.quiz.length > 0;
+    return (
+      <div className="quiz-card fade-in" style={{ textAlign: "center", padding: "32px 24px" }}>
+        <h2 style={{ fontSize: "1.5rem", marginBottom: "24px", color: "var(--text-main)", fontWeight: 800 }}>
+          🎉 記事を完了しました
+        </h2>
+        
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "28px", background: "var(--bg)", padding: "16px 20px", borderRadius: "16px", textAlign: "left" }}>
+          {hasQuiz && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>スコア</span>
+              <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>{quizScore} / {currentLevelData.quiz?.length}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>獲得 XP</span>
+            <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "var(--primary)" }}>
+              +{20 + (hasQuiz ? 10 + (quizScore === currentLevelData.quiz?.length ? 5 : 0) : 0) + (dailyArticle?.id === currentArticle?.id ? 10 : 0)} XP
+            </span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>ストリーク</span>
+            <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "#ff9500" }}>🔥 {currentStreak} {appLang === 'ja' ? '日' : 'jours'}</span>
+          </div>
+          {currentLevelData?.targetVocabulary && currentLevelData.targetVocabulary.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>新しい単語</span>
+              <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>📚 {currentLevelData.targetVocabulary.length} items</span>
+            </div>
+          )}
+        </div>
+
+        {currentArticle?.seriesId && (
+          <div style={{ marginBottom: "28px", padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", background: "var(--bg)" }}>
+            <p style={{ margin: "0 0 6px 0", fontSize: "0.95rem", color: "var(--primary)", fontWeight: 800 }}>
+              {currentArticle.seriesId.replace(/_/g, ' ')}
+            </p>
+            <p style={{ margin: "0", fontWeight: 700, color: "var(--text-main)" }}>
+              Article {currentArticle.seriesOrder || '?'} / {articles.filter(a => a.seriesId === currentArticle.seriesId).length}
+            </p>
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          {currentArticle?.seriesId ? (
+            quizNextEp ? (
+              <button
+                onClick={() => openArticle(quizNextEp)}
+                style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+              >
+                次のエピソード
+              </button>
+            ) : (
+              <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center" }}>
+                🏆 シリーズ完結 (Series Completed)
+              </div>
+            )
+          ) : (
+            <button
+              onClick={() => {
+                setActiveView("home");
+                window.scrollTo(0,0);
+              }}
+              style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+            >
+              次の記事
+            </button>
+          )}
+          
+          <button
+            onClick={() => {
+              setActiveView("home");
+              window.scrollTo(0,0);
+            }}
+            style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--bg)", color: "var(--text-main)", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+          >
+            ホームへ戻る
+          </button>
+        </div>
+      </div>
+    );
+  };
+return (
     <div className="app-shell">
       {/* Toast Notification */}
       {toastMsg && (
@@ -1454,12 +1550,18 @@ export default function FuragoApp({
                     </p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => openArticle(dailyArticle)}
-                  style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: isMissionCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isMissionCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-                >
-                  {isMissionCompletedToday ? '復習する' : '読む'}
-                </button>
+                {!isMissionCompletedToday ? (
+                  <button 
+                    onClick={() => openArticle(dailyArticle)}
+                    style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                  >
+                    読む
+                  </button>
+                ) : (
+                  <div style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', background: 'rgba(76, 217, 100, 0.15)', color: '#2e7d32', fontSize: '1.05rem', fontWeight: 800, textAlign: 'center' }}>
+                    🎉 今日のミッション完了
+                  </div>
+                )}
               </div>
             )}
 
@@ -1712,188 +1814,121 @@ export default function FuragoApp({
             {renderInteractiveContent((currentLevelData.paragraphs || currentLevelData.segments || []))}
           </div>
 
-          {/* Comprehension Quiz */}
-          {currentLevelData.quiz && currentLevelData.quiz.length > 0 && (
+          {/* Comprehension Quiz and Completion */}
+          {((currentLevelData.quiz && currentLevelData.quiz.length > 0 && quizIndex >= currentLevelData.quiz.length) || noQuizCompleted) ? (
+            <div className="quiz-section">
+              {renderCompletionScreen()}
+            </div>
+          ) : (currentLevelData.quiz && currentLevelData.quiz.length > 0) ? (
             <div className="quiz-section">
               <h3>🧠 {appLang === 'ja' ? '理解度チェック' : 'Comprehension Check'}</h3>
-              {quizIndex >= currentLevelData.quiz.length ? (
-                <div className="quiz-card fade-in" style={{ textAlign: "center", padding: "32px 24px" }}>
-                  <h2 style={{ fontSize: "1.5rem", marginBottom: "24px", color: "var(--text-main)", fontWeight: 800 }}>
-                    🎉 記事を完了しました
-                  </h2>
-                  
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "28px", background: "var(--bg)", padding: "16px 20px", borderRadius: "16px", textAlign: "left" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>スコア</span>
-                      <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>{quizScore} / {currentLevelData.quiz.length}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>獲得 XP</span>
-                      <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "var(--primary)" }}>
-                        +{20 + 10 + (quizScore === currentLevelData.quiz.length ? 5 : 0) + (dailyArticle?.id === currentArticle.id ? 10 : 0)} XP
-                      </span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>ストリーク</span>
-                      <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "#ff9500" }}>🔥 {currentStreak} {appLang === 'ja' ? '日' : 'jours'}</span>
-                    </div>
-                    {currentLevelData.targetVocabulary && currentLevelData.targetVocabulary.length > 0 && (
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>新しい単語</span>
-                        <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>📚 {currentLevelData.targetVocabulary.length} items</span>
-                      </div>
-                    )}
-                  </div>
+              {(() => {
+                const q = currentLevelData.quiz[quizIndex];
+                if (!q.choices && !(Array.isArray(q.options))) {
+                  return null;
+                }
+                
+                const qId = q.id;
+                const isQTranslated = !!translatedQuizIds[qId];
 
-                  {currentArticle.seriesId && (
-                    <div style={{ marginBottom: "28px", padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", background: "var(--bg)" }}>
-                      <p style={{ margin: "0 0 6px 0", fontSize: "0.95rem", color: "var(--primary)", fontWeight: 800 }}>
-                        {currentArticle.seriesId.replace(/_/g, ' ')}
-                      </p>
-                      <p style={{ margin: "0", fontWeight: 700, color: "var(--text-main)" }}>
-                        Article {currentArticle.seriesOrder || '?'} / {articles.filter(a => a.seriesId === currentArticle.seriesId).length}
-                      </p>
-                    </div>
-                  )}
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    {currentArticle.seriesId ? (
-                      quizNextEp ? (
+                return (
+                  <div className="quiz-card fade-in" key={quizIndex}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <p
+                          style={{
+                            color: "var(--text-muted)",
+                            fontSize: "0.88rem",
+                            fontWeight: 700,
+                            margin: 0
+                          }}
+                        >
+                          Q {quizIndex + 1} / {currentLevelData.quiz?.length}
+                        </p>
                         <button
-                          onClick={() => openArticle(quizNextEp)}
-                          style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+                          onClick={() => setTranslatedQuizIds(prev => ({...prev, [qId]: !prev[qId]}))}
+                          style={{
+                              background: "none", border: "none", color: "var(--primary)",
+                              fontSize: "0.75rem", cursor: "pointer", fontWeight: 700
+                          }}
                         >
-                          次のエピソード
+                          {isQTranslated ? t.reading.hideTranslation : t.reading.translateQuestion}
                         </button>
-                      ) : (
-                        <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center" }}>
-                          🏆 シリーズ完結 (Series Completed)
-                        </div>
-                      )
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setActiveView("home");
-                          window.scrollTo(0,0);
-                        }}
-                        style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-                      >
-                        次の記事
-                      </button>
-                    )}
-                    
-                    <button
-                      onClick={() => {
-                        setQuizIndex(0);
-                        setQuizScore(0);
-                        setSelectedAnswer(null);
-                        window.scrollTo(0,0);
-                      }}
-                      style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--bg)", color: "var(--text-main)", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-                    >
-                      今日の復習
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                (() => {
-                  const q = currentLevelData.quiz[quizIndex];
-                  if (!q.choices && !(Array.isArray(q.options))) {
-                    return null;
-                  }
-                  
-                  const qId = q.id;
-                  const isQTranslated = !!translatedQuizIds[qId];
-
-                  return (
-                    <div className="quiz-card fade-in" key={quizIndex}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                          <p
-                            style={{
-                              color: "var(--text-muted)",
-                              fontSize: "0.88rem",
-                              fontWeight: 700,
-                              margin: 0
-                            }}
-                          >
-                            Q {quizIndex + 1} / {currentLevelData.quiz.length}
-                          </p>
-                          <button
-                            onClick={() => setTranslatedQuizIds(prev => ({...prev, [qId]: !prev[qId]}))}
-                            style={{
-                                background: "none", border: "none", color: "var(--primary)",
-                                fontSize: "0.75rem", cursor: "pointer", fontWeight: 700
-                            }}
-                          >
-                            {isQTranslated ? t.reading.hideTranslation : t.reading.translateQuestion}
-                          </button>
-                      </div>
-                      
-                      <p className="quiz-question" lang="fr">
-                        {(q.question?.fr || q.prompt?.fr)}
-                      </p>
-                      {isQTranslated && (
-                          <p className="quiz-question" style={{ fontSize: '0.95rem', color: 'var(--text-muted)', marginTop: '-10px', marginBottom: '20px' }}>
-                              {appLang === 'ja' ? (q.question?.ja || q.prompt?.ja) : (q.question?.en || q.prompt?.en)}
-                          </p>
-                      )}
-                      
-                      <div>
-                        {(q.choices || (Array.isArray(q.options) ? q.options : [])).map((choice, cIdx) => {
-                          const key = choice.id;
-                          const isChosen = selectedAnswer === key;
-                          const isCorrectOption = choice.isCorrect;
-
-                          let statusClass = "";
-                          if (selectedAnswer !== null) {
-                            if (isCorrectOption) statusClass = "correct";
-                            else if (isChosen) statusClass = "incorrect";
-                          }
-
-                          return (
-                            <button
-                              key={key}
-                              disabled={selectedAnswer !== null}
-                              className={`quiz-option ${statusClass}`}
-                              onClick={() => {
-                                setSelectedAnswer(key);
-                                if (isCorrectOption) {
-                                  setQuizScore((s) => s + 1);
-                                }
-                                setTimeout(() => {
-                                  setSelectedAnswer(null);
-                                  setQuizIndex((idx) => idx + 1);
-                                }, 1700);
-                              }}
-                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
-                            >
-                              <span lang="fr">{cIdx + 1}. {choice.text.fr}</span>
-                              {isQTranslated && (
-                                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                      {appLang === 'ja' ? choice.text.ja : choice.text.en}
-                                  </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {selectedAnswer !== null && (
-                        <div
-                          className={`quiz-feedback-text ${
-                            (q.choices || (Array.isArray(q.options) ? q.options : [])).find(c => c.id === selectedAnswer)?.isCorrect
-                              ? "text-correct"
-                              : "text-incorrect"
-                          }`}
-                        >
-                          {(q.choices || (Array.isArray(q.options) ? q.options : [])).find(c => c.id === selectedAnswer)?.isCorrect
-                            ? `⭕ ${t.quiz.correct}`
-                            : `❌ ${t.quiz.wrong}`}
-                        </div>
-                      )}
                     </div>
-                  );
-                })()
-              )}
+                    
+                    <p style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px', lineHeight: '1.4' }} lang="fr">
+                      {(q.question?.fr || q.prompt?.fr)}
+                    </p>
+                    {isQTranslated && (
+                        <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '16px', marginTop: '0' }}>
+                            {appLang === 'ja' ? (q.question?.ja || q.prompt?.ja) : (q.question?.en || q.prompt?.en)}
+                        </p>
+                    )}
+                    {!isQTranslated && <div style={{ height: '16px' }} />}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {(q.choices || (Array.isArray(q.options) ? q.options : [])).map((choice, cIdx) => {
+                        const key = choice.id || String(cIdx);
+                        const isChosen = selectedAnswer === key;
+                        const isCorrectOption = choice.isCorrect;
+                        
+                        let statusClass = "";
+                        if (selectedAnswer !== null) {
+                          if (isCorrectOption) statusClass = "correct";
+                          else if (isChosen) statusClass = "incorrect";
+                        }
+
+                        return (
+                          <button
+                            key={key}
+                            disabled={selectedAnswer !== null}
+                            className={`quiz-option ${statusClass}`}
+                            onClick={() => {
+                              setSelectedAnswer(key);
+                              if (isCorrectOption) {
+                                setQuizScore((s) => s + 1);
+                              }
+                              setTimeout(() => {
+                                setSelectedAnswer(null);
+                                setQuizIndex((idx) => idx + 1);
+                              }, 1700);
+                            }}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
+                          >
+                            <span lang="fr">{cIdx + 1}. {choice.text.fr}</span>
+                            {isQTranslated && (
+                                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                    {appLang === 'ja' ? choice.text.ja : choice.text.en}
+                                </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedAnswer !== null && (
+                      <div
+                        className={`quiz-feedback-text ${
+                          (q.choices || (Array.isArray(q.options) ? q.options : [])).find(c => c.id === selectedAnswer)?.isCorrect
+                            ? "text-correct"
+                            : "text-incorrect"
+                        }`}
+                      >
+                        {(q.choices || (Array.isArray(q.options) ? q.options : [])).find(c => c.id === selectedAnswer)?.isCorrect
+                          ? `⭕ ${t.quiz.correct}`
+                          : `❌ ${t.quiz.wrong}`}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            <div className="quiz-section" style={{ textAlign: "center", marginTop: "40px" }}>
+              <button
+                onClick={() => setNoQuizCompleted(true)}
+                style={{ width: "100%", padding: "16px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.1rem", fontWeight: 700, cursor: "pointer" }}
+              >
+                🎉 読み終わった (Mark as Completed)
+              </button>
             </div>
           )}
         </main>
