@@ -1621,7 +1621,7 @@ return (
                          : (continueArticle.levels[globalLevel]?.title as any)?.fr || continueArticle.originalTitle}
                     </h3>
                     <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
-                      {globalLevel.replace('LVL_', 'Level ')}
+                      {t.levels[globalLevel as keyof typeof t.levels]}
                     </p>
                   </div>
                 </div>
@@ -1656,7 +1656,7 @@ return (
                          : (dailyArticle.levels[globalLevel]?.title as any)?.fr || dailyArticle.originalTitle}
                     </h3>
                     <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
-                      {globalLevel.replace('LVL_', 'Level ')} · 5 min
+                      {t.levels[globalLevel as keyof typeof t.levels]} · 5 min
                     </p>
                   </div>
                 </div>
@@ -1865,7 +1865,7 @@ return (
               }}
             >
               <span className="badge" style={{ fontSize: "0.85rem" }}>
-                {globalLevel}
+                {t.levels[globalLevel as keyof typeof t.levels] || globalLevel}
               </span>
               <span
                 className="badge"
