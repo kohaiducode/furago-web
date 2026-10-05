@@ -1,5 +1,6 @@
 "use client";
 
+import { loadUserState, updateUserState, UserState } from "../lib/userState";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
 
@@ -216,14 +217,6 @@ export default function FuragoApp({
   const [lastCompletedDate, setLastCompletedDate] = useState<string>("");
   const [lastVocabReviewDate, setLastVocabReviewDate] = useState<string>("");
   const [lastOpenedArticleId, setLastOpenedArticleId] = useState<string>("");
-  useEffect(() => {
-    const d = localStorage.getItem("furago_daily_completed_date");
-    if (d) setLastCompletedDate(d);
-    const v = localStorage.getItem("furago_xp_vocab_date");
-    if (v) setLastVocabReviewDate(v);
-    const opened = localStorage.getItem("furago_last_opened_articleId");
-    if (opened) setLastOpenedArticleId(opened);
-  }, []);
 
   const todayStr = new Date().toLocaleDateString("en-CA"); // local timezone YYYY-MM-DD
   const isMissionCompletedToday = lastCompletedDate === todayStr;
@@ -233,19 +226,15 @@ export default function FuragoApp({
   const [longestStreak, setLongestStreak] = useState<number>(0);
   const [lastStreakDate, setLastStreakDate] = useState<string>("");
 
-  useEffect(() => {
-    setCurrentStreak(parseInt(localStorage.getItem("furago_current_streak") || "0", 10));
-    setLongestStreak(parseInt(localStorage.getItem("furago_longest_streak") || "0", 10));
-    setLastStreakDate(localStorage.getItem("furago_last_streak_date") || "");
-  }, []);
 
   const updateStreak = useCallback(() => {
     const today = new Date().toLocaleDateString("en-CA");
-    const storedDate = localStorage.getItem("furago_last_streak_date") || "";
+    const state = loadUserState();
+    const storedDate = state.lastStreakDate;
     if (storedDate === today) return;
 
-    let cs = parseInt(localStorage.getItem("furago_current_streak") || "0", 10);
-    let ls = parseInt(localStorage.getItem("furago_longest_streak") || "0", 10);
+    let cs = state.currentStreak;
+    let ls = state.longestStreak;
 
     if (!storedDate) {
       cs = 1;
@@ -264,9 +253,11 @@ export default function FuragoApp({
     }
 
     ls = Math.max(ls, cs);
-    localStorage.setItem("furago_current_streak", cs.toString());
-    localStorage.setItem("furago_longest_streak", ls.toString());
-    localStorage.setItem("furago_last_streak_date", today);
+    updateUserState({
+      currentStreak: cs,
+      longestStreak: ls,
+      lastStreakDate: today,
+    });
     
     setCurrentStreak(cs);
     setLongestStreak(ls);
@@ -275,63 +266,67 @@ export default function FuragoApp({
 
   // XP State and logic
   const [totalXP, setTotalXP] = useState<number>(0);
-  useEffect(() => {
-    setTotalXP(parseInt(localStorage.getItem("furago_xp") || "0", 10));
-  }, []);
 
   const addXP = useCallback((amount: number) => {
     setTotalXP(prev => {
       const next = prev + amount;
-      localStorage.setItem("furago_xp", next.toString());
+      updateUserState({ xp: next });
       return next;
     });
   }, []);
 
   const checkAndAwardArticleXP = useCallback((articleId: string) => {
-    const key = "furago_xp_articles";
-    const done = JSON.parse(localStorage.getItem(key) || "[]");
+    const state = loadUserState();
+    const done = [...state.completedArticles];
     if (!done.includes(articleId)) {
       done.push(articleId);
-      localStorage.setItem(key, JSON.stringify(done));
+      updateUserState({ completedArticles: done });
       addXP(20);
     }
   }, [addXP]);
 
   const checkAndAwardQuizXP = useCallback((articleId: string, isPerfect: boolean) => {
-    const quizKey = "furago_xp_quizzes";
-    const doneQ = JSON.parse(localStorage.getItem(quizKey) || "[]");
+    const state = loadUserState();
+    let updated = false;
+    const nextState: Partial<import("../lib/userState").UserState> = {};
+    
+    const doneQ = [...state.quizResults];
     if (!doneQ.includes(articleId)) {
       doneQ.push(articleId);
-      localStorage.setItem(quizKey, JSON.stringify(doneQ));
+      nextState.quizResults = doneQ;
       addXP(10);
+      updated = true;
     }
     if (isPerfect) {
-      const perfKey = "furago_xp_perfects";
-      const doneP = JSON.parse(localStorage.getItem(perfKey) || "[]");
+      const doneP = [...state.perfectQuizResults];
       if (!doneP.includes(articleId)) {
         doneP.push(articleId);
-        localStorage.setItem(perfKey, JSON.stringify(doneP));
+        nextState.perfectQuizResults = doneP;
         addXP(5);
+        updated = true;
       }
+    }
+    if (updated) {
+      updateUserState(nextState);
     }
   }, [addXP]);
 
   const checkAndAwardDailyMissionXP = useCallback(() => {
-    const key = "furago_xp_daily_date";
-    const lastDate = localStorage.getItem(key);
+    const state = loadUserState();
+    const lastDate = state.dailyMissionXPDate;
     const today = new Date().toLocaleDateString("en-CA");
     if (lastDate !== today) {
-      localStorage.setItem(key, today);
+      updateUserState({ dailyMissionXPDate: today });
       addXP(10);
     }
   }, [addXP]);
 
   const checkAndAwardVocabReviewXP = useCallback(() => {
-    const key = "furago_xp_vocab_date";
-    const lastDate = localStorage.getItem(key);
+    const state = loadUserState();
+    const lastDate = state.vocabReviewXPDate;
     const today = new Date().toLocaleDateString("en-CA");
     if (lastDate !== today) {
-      localStorage.setItem(key, today);
+      updateUserState({ vocabReviewXPDate: today });
       setLastVocabReviewDate(today);
       addXP(10);
     }
@@ -385,7 +380,7 @@ export default function FuragoApp({
           updateStreak();
           checkAndAwardArticleXP(currentArticle.id.toString());
           if (dailyArticle && currentArticle.id === dailyArticle.id) {
-            localStorage.setItem("furago_daily_completed_date", todayStr);
+            updateUserState({ dailyMissionCompletedDate: todayStr });
             setLastCompletedDate(todayStr);
             checkAndAwardDailyMissionXP();
           }
@@ -395,7 +390,7 @@ export default function FuragoApp({
         checkAndAwardArticleXP(currentArticle.id.toString());
         checkAndAwardQuizXP(currentArticle.id.toString(), quizScore === q.length);
         if (dailyArticle && currentArticle.id === dailyArticle.id) {
-          localStorage.setItem("furago_daily_completed_date", todayStr);
+          updateUserState({ dailyMissionCompletedDate: todayStr });
           setLastCompletedDate(todayStr);
           checkAndAwardDailyMissionXP();
         }
@@ -408,7 +403,7 @@ export default function FuragoApp({
     const lastOpened = articles.find(a => a.id.toString() === lastOpenedArticleId && a.levels && a.levels[globalLevel]);
     if (!lastOpened) return { continueArticle: null, currentSeriesNextEp: null };
 
-    const done = JSON.parse(typeof window !== "undefined" ? localStorage.getItem("furago_xp_articles") || "[]" : "[]");
+    const done = typeof window !== "undefined" ? loadUserState().completedArticles : [];
     const isCompleted = done.includes(lastOpened.id.toString());
 
     if (!isCompleted) {
@@ -433,22 +428,18 @@ export default function FuragoApp({
   useEffect(() => {
     DictionaryService.init();
 
-    // Load saved word lists & words from localStorage
+    // Load centralized user state
     try {
-      const rawLists = localStorage.getItem("furago_lists");
-      if (rawLists) {
-        const parsed = JSON.parse(rawLists);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setWordLists(parsed);
-        }
-      }
-      const rawWords = localStorage.getItem("furago_words");
-      if (rawWords) {
-        const parsedWords = JSON.parse(rawWords);
-        if (Array.isArray(parsedWords)) {
-          setSavedWords(parsedWords);
-        }
-      }
+      const state = loadUserState();
+      setLastCompletedDate(state.dailyMissionCompletedDate);
+      setLastVocabReviewDate(state.vocabReviewXPDate);
+      setLastOpenedArticleId(state.lastOpenedArticleId);
+      setCurrentStreak(state.currentStreak);
+      setLongestStreak(state.longestStreak);
+      setLastStreakDate(state.lastStreakDate);
+      setTotalXP(state.xp);
+      setWordLists(state.wordLists);
+      setSavedWords(state.savedVocabulary);
       if (localStorage.getItem("furago_lead_subscribed") === "1") {
         setShowLeadBar(false);
       } else {
@@ -762,7 +753,7 @@ export default function FuragoApp({
     setDictOpen(false);
     setCurrentArticle(article);
     setLastOpenedArticleId(article.id.toString());
-    localStorage.setItem("furago_last_opened_articleId", article.id.toString());
+    updateUserState({ lastOpenedArticleId: article.id.toString() });
     setQuizIndex(0);
     setQuizScore(0);
     setNoQuizCompleted(false);
@@ -908,7 +899,7 @@ export default function FuragoApp({
 
     const updated = [...savedWords, newWord];
     setSavedWords(updated);
-    localStorage.setItem("furago_words", JSON.stringify(updated));
+    updateUserState({ savedVocabulary: updated as any });
     showToast(t.toasts.saved);
   };
 
@@ -922,7 +913,7 @@ export default function FuragoApp({
     };
     const updated = [...wordLists, newList];
     setWordLists(updated);
-    localStorage.setItem("furago_lists", JSON.stringify(updated));
+    updateUserState({ wordLists: updated as any });
     setNewListName("");
     setNewListModalOpen(false);
     showToast(t.toasts.listCreated);
@@ -934,7 +925,7 @@ export default function FuragoApp({
       (w) => !(w.fr === wordFr && w.listId === listId)
     );
     setSavedWords(updated);
-    localStorage.setItem("furago_words", JSON.stringify(updated));
+    updateUserState({ savedVocabulary: updated as any });
     showToast(t.toasts.deleted);
   };
 
