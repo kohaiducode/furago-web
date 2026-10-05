@@ -1092,6 +1092,13 @@ export default function FuragoApp({
     }
     if (!article.levels || !article.levels[globalLevel]) return false;
     return true;
+  }).sort((a, b) => {
+    if (a.seriesId && a.seriesId === b.seriesId) {
+      return (a.seriesOrder || 0) - (b.seriesOrder || 0);
+    }
+    // Default fallback to keep non-series articles (or different series) in their original relative order.
+    // Usually they are already sorted by date descending in the source JSON.
+    return 0; 
   });
 
   // Render interactive French paragraph with clickable words and TTS highlight
@@ -1517,6 +1524,11 @@ export default function FuragoApp({
           )}
 
           <div className="article-header">
+            {currentArticle.seriesId && (
+              <p style={{ margin: "0 0 8px 0", fontSize: "0.95rem", color: "var(--primary)", fontWeight: 800 }}>
+                {currentArticle.seriesId.replace(/_/g, ' ')} • {currentArticle.seriesOrder || '?'} / {articles.filter(a => a.seriesId === currentArticle.seriesId).length}
+              </p>
+            )}
             <h2 lang="fr">{typeof currentLevelData.title === "string" ? currentLevelData.title : (currentLevelData.title as any)?.fr}</h2>
             <div
               style={{
@@ -1638,19 +1650,29 @@ export default function FuragoApp({
 
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     {currentArticle.seriesId ? (
-                      <button
-                        onClick={() => {
-                          const nextEp = articles.find(a => a.seriesId === currentArticle.seriesId && a.seriesOrder === (currentArticle.seriesOrder || 0) + 1);
-                          if (nextEp) openArticle(nextEp);
-                          else {
-                            setActiveView("home");
-                            window.scrollTo(0,0);
-                          }
-                        }}
-                        style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-                      >
-                        次のエピソード
-                      </button>
+                      (() => {
+                        const nextEp = articles
+                          .filter(a => a.seriesId === currentArticle.seriesId && (a.seriesOrder || 0) > (currentArticle.seriesOrder || 0))
+                          .sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0))[0];
+                        if (nextEp) {
+                          return (
+                            <button
+                              onClick={() => {
+                                openArticle(nextEp);
+                              }}
+                              style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+                            >
+                              次のエピソード
+                            </button>
+                          );
+                        } else {
+                          return (
+                            <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center" }}>
+                              🏆 シリーズ完結 (Series Completed)
+                            </div>
+                          );
+                        }
+                      })()
                     ) : (
                       <button
                         onClick={() => {
