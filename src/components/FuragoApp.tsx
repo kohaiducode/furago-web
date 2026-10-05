@@ -144,10 +144,24 @@ export default function FuragoApp({
   const [activeView, setActiveView] = useState<"home" | "reading" | "words" | "vocab_review">("home");
 
   // i18n States
-  const [appLang, setAppLang] = useState<AppLanguage>("ja");
+  const [appLang, setAppLang] = useState<AppLanguage>(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("furago_app_lang") as AppLanguage) || "ja";
+    }
+    return "ja";
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("furago_app_lang", appLang);
+    }
+  }, [appLang]);
   const t = getTranslation(appLang);
   const [showTranslation, setShowTranslation] = useState<Record<number, boolean>>({});
   const [translatedQuizIds, setTranslatedQuizIds] = useState<Record<string, boolean>>({});
+  
+  // Session Rewards tracking for accurate completion screen
+  const [sessionReward, setSessionReward] = useState<{ xp: number; vocab: number } | null>(null);
 
 
   // Articles & Filters
@@ -186,6 +200,7 @@ export default function FuragoApp({
   const ttsQueueRef = useRef<TtsQueueItem[]>([]);
   const audioSpeedRef = useRef(1);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const dictRequestIdRef = useRef<number>(0);
 
   // Dictionary Popup State
   const [dictOpen, setDictOpen] = useState<boolean>(false);
@@ -294,11 +309,8 @@ export default function FuragoApp({
   const [totalXP, setTotalXP] = useState<number>(0);
 
   const addXP = useCallback((amount: number) => {
-    setTotalXP(prev => {
-      const next = prev + amount;
-      updateUserState({ xp: next });
-      return next;
-    });
+    const nextState = updateUserState({ xp: loadUserState().xp + amount });
+    setTotalXP(nextState.xp);
   }, []);
 
   const checkAndAwardArticleXP = useCallback((articleId: string, targetVocab?: string[]) => {
@@ -309,6 +321,9 @@ export default function FuragoApp({
     let shouldUpdate = false;
     let newLearnedVocab = state.learnedVocabulary;
     
+    let awardedXP = 0;
+    let newVocabCount = 0;
+
     if (newProgress[progressKey] !== undefined) {
       delete newProgress[progressKey];
       shouldUpdate = true;
@@ -317,9 +332,12 @@ export default function FuragoApp({
     if (!done.includes(articleId)) {
       done.push(articleId);
       addXP(20);
+      awardedXP += 20;
       
       if (targetVocab && targetVocab.length > 0) {
+        const oldLen = state.learnedVocabulary.length;
         newLearnedVocab = mergeLearnedVocabulary(state.learnedVocabulary, targetVocab, articleId);
+        newVocabCount = newLearnedVocab.length - oldLen;
       }
       
       shouldUpdate = true;
@@ -328,18 +346,22 @@ export default function FuragoApp({
     if (shouldUpdate) {
       updateUserState({ completedArticles: done, articleProgress: newProgress, learnedVocabulary: newLearnedVocab });
     }
+    
+    return { awardedXP, newVocabCount };
   }, [addXP, globalLevel]);
 
   const checkAndAwardQuizXP = useCallback((articleId: string, isPerfect: boolean) => {
     const state = loadUserState();
     let updated = false;
     const nextState: Partial<import("../lib/userState").UserState> = {};
+    let awardedXP = 0;
     
     const doneQ = [...state.quizResults];
     if (!doneQ.includes(articleId)) {
       doneQ.push(articleId);
       nextState.quizResults = doneQ;
       addXP(10);
+      awardedXP += 10;
       updated = true;
     }
     if (isPerfect) {
@@ -348,12 +370,14 @@ export default function FuragoApp({
         doneP.push(articleId);
         nextState.perfectQuizResults = doneP;
         addXP(5);
+        awardedXP += 5;
         updated = true;
       }
     }
     if (updated) {
       updateUserState(nextState);
     }
+    return awardedXP;
   }, [addXP]);
 
   const checkAndAwardDailyMissionXP = useCallback(() => {
@@ -363,7 +387,9 @@ export default function FuragoApp({
     if (lastDate !== today) {
       updateUserState({ dailyMissionXPDate: today });
       addXP(10);
+      return 10;
     }
+    return 0;
   }, [addXP]);
 
   const checkAndAwardVocabReviewXP = useCallback(() => {
@@ -473,9 +499,18 @@ export default function FuragoApp({
   const dailyArticle = React.useMemo(() => {
     const available = articles.filter(a => a.levels && a.levels[globalLevel]);
     if (available.length === 0) return null;
+    
     const sorted = [...available].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    const featured = sorted.filter(a => a.featured);
-    const pool = featured.length > 0 ? featured : sorted;
+    
+    const state = typeof window !== "undefined" ? loadUserState() : null;
+    const completed = state?.completedArticles || [];
+    
+    const uncompleted = sorted.filter(a => !completed.includes(String(a.id)));
+    const validPool = uncompleted.length > 0 ? uncompleted : sorted;
+    
+    const featured = validPool.filter(a => a.featured);
+    const pool = featured.length > 0 ? featured : validPool;
+    
     const seed = new Date(todayStr).getTime() / 86400000;
     const index = Math.abs(Math.floor(seed)) % pool.length;
     return pool[index];
@@ -542,34 +577,42 @@ export default function FuragoApp({
       const q = currentArticle.levels[globalLevel]?.quiz;
       if (!q || q.length === 0) {
         if (noQuizCompleted) {
-          // Intentional: completion rewards are applied when the completion state is reached (deduplicated in userState).
-          // eslint-disable-next-line react-hooks/set-state-in-effect
-          updateStreak();
-          checkAndAwardArticleXP(
-            currentArticle.id.toString(),
-            currentArticle.levels[globalLevel]?.targetVocabulary
-          );
-          if (dailyArticle && currentArticle.id === dailyArticle.id) {
-            updateUserState({ dailyMissionCompletedDate: todayStr });
-            setLastCompletedDate(todayStr);
-            checkAndAwardDailyMissionXP();
+          if (sessionReward === null) {
+            // Intentional: completion rewards are applied when the completion state is reached (deduplicated in userState).
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            updateStreak();
+            const artRes = checkAndAwardArticleXP(
+              currentArticle.id.toString(),
+              currentArticle.levels[globalLevel]?.targetVocabulary
+            );
+            let totalXP = artRes.awardedXP;
+            if (dailyArticle && currentArticle.id === dailyArticle.id) {
+              updateUserState({ dailyMissionCompletedDate: todayStr });
+              setLastCompletedDate(todayStr);
+              totalXP += checkAndAwardDailyMissionXP();
+            }
+            setSessionReward({ xp: totalXP, vocab: artRes.newVocabCount });
           }
         }
       } else if (quizIndex >= q.length) {
-        updateStreak();
-        checkAndAwardArticleXP(
-          currentArticle.id.toString(),
-          currentArticle.levels[globalLevel]?.targetVocabulary
-        );
-        checkAndAwardQuizXP(currentArticle.id.toString(), quizScore === q.length);
-        if (dailyArticle && currentArticle.id === dailyArticle.id) {
-          updateUserState({ dailyMissionCompletedDate: todayStr });
-          setLastCompletedDate(todayStr);
-          checkAndAwardDailyMissionXP();
+        if (sessionReward === null) {
+          updateStreak();
+          const artRes = checkAndAwardArticleXP(
+            currentArticle.id.toString(),
+            currentArticle.levels[globalLevel]?.targetVocabulary
+          );
+          let totalXP = artRes.awardedXP;
+          totalXP += checkAndAwardQuizXP(currentArticle.id.toString(), quizScore === q.length);
+          if (dailyArticle && currentArticle.id === dailyArticle.id) {
+            updateUserState({ dailyMissionCompletedDate: todayStr });
+            setLastCompletedDate(todayStr);
+            totalXP += checkAndAwardDailyMissionXP();
+          }
+          setSessionReward({ xp: totalXP, vocab: artRes.newVocabCount });
         }
       }
     }
-  }, [activeView, currentArticle, globalLevel, quizIndex, quizScore, updateStreak, checkAndAwardArticleXP, checkAndAwardQuizXP, noQuizCompleted, dailyArticle, todayStr, checkAndAwardDailyMissionXP]);
+  }, [activeView, currentArticle, globalLevel, quizIndex, quizScore, updateStreak, checkAndAwardArticleXP, checkAndAwardQuizXP, noQuizCompleted, dailyArticle, todayStr, checkAndAwardDailyMissionXP, sessionReward]);
 
   const { continueArticle, currentSeriesNextEp } = React.useMemo(() => {
     if (!lastOpenedArticleId) return { continueArticle: null, currentSeriesNextEp: null };
@@ -941,6 +984,7 @@ export default function FuragoApp({
     setQuizScore(0);
     setNoQuizCompleted(false);
     setSelectedAnswer(null);
+    setSessionReward(null);
     const levelData = article.levels[globalLevel];
     if (levelData) {
       buildQueueForText((levelData.paragraphs || levelData.segments || []));
@@ -1023,6 +1067,8 @@ export default function FuragoApp({
     e.stopPropagation();
     if (!word.trim()) return;
 
+    const reqId = ++dictRequestIdRef.current;
+
     const rect = e.currentTarget.getBoundingClientRect();
     setDictRect(rect);
     setDictOpen(true);
@@ -1030,8 +1076,11 @@ export default function FuragoApp({
     setDictData(null);
 
     const result = await DictionaryService.lookupWord(word, paragraphText, appLang as "ja" | "en");
-    setDictData(result);
-    setDictLoading(false);
+    
+    if (dictRequestIdRef.current === reqId) {
+      setDictData(result);
+      setDictLoading(false);
+    }
   };
 
   // Close Dictionary Popup when clicking outside
@@ -1311,14 +1360,9 @@ export default function FuragoApp({
       return false;
     }
     if (!article.levels || !article.levels[globalLevel]) return false;
+    const lvl = article.levels[globalLevel];
+    if (!lvl.paragraphs?.length && !lvl.segments?.length) return false;
     return true;
-  }).sort((a, b) => {
-    if (a.seriesId && a.seriesId === b.seriesId) {
-      return (a.seriesOrder || 0) - (b.seriesOrder || 0);
-    }
-    // Default fallback to keep non-series articles (or different series) in their original relative order.
-    // Usually they are already sorted by date descending in the source JSON.
-    return 0; 
   });
 
   // Render interactive French paragraph with clickable words and TTS highlight
@@ -1423,36 +1467,61 @@ export default function FuragoApp({
 
   const quizNextEp = (activeView === "reading" && currentArticle?.seriesId) ? getSeriesInfo(currentArticle, globalLevel)?.nextEp : null;
 
-    const renderCompletionScreen = () => {
+  const renderCompletionScreen = () => {
     const hasQuiz = currentLevelData?.quiz && currentLevelData.quiz.length > 0;
     const sInfo = getSeriesInfo(currentArticle, globalLevel);
+
+    const getNextArticle = () => {
+      if (!currentArticle) return null;
+      const validArticles = filteredArticles;
+      if (validArticles.length <= 1) return null;
+
+      const currentIndex = validArticles.findIndex(a => a.id === currentArticle.id);
+      if (currentIndex === -1) return null;
+
+      const state = loadUserState();
+      const completed = state.completedArticles || [];
+
+      // Look forward
+      for (let i = currentIndex + 1; i < validArticles.length; i++) {
+        if (!completed.includes(String(validArticles[i].id))) return validArticles[i];
+      }
+      // Look from start
+      for (let i = 0; i < currentIndex; i++) {
+        if (!completed.includes(String(validArticles[i].id))) return validArticles[i];
+      }
+      
+      // Fallback: Just next article in the filtered list
+      return validArticles[(currentIndex + 1) % validArticles.length];
+    };
+
     return (
       <div className="quiz-card fade-in" style={{ textAlign: "center", padding: "32px 24px" }}>
         <h2 style={{ fontSize: "1.5rem", marginBottom: "24px", color: "var(--text-main)", fontWeight: 800 }}>
-          🎉 記事を完了しました
+          {appLang === "ja" ? "🎉 記事を完了しました" : "🎉 Article Completed"}
         </h2>
         
         <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "28px", background: "var(--bg)", padding: "16px 20px", borderRadius: "16px", textAlign: "left" }}>
           {hasQuiz && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>スコア</span>
+              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "スコア" : "Score"}</span>
               <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>{quizScore} / {currentLevelData.quiz?.length}</span>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>獲得 XP</span>
+            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "獲得 XP" : "Earned XP"}</span>
             <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "var(--primary)" }}>
-              +{20 + (hasQuiz ? 10 + (quizScore === currentLevelData.quiz?.length ? 5 : 0) : 0) + (dailyArticle?.id === currentArticle?.id ? 10 : 0)} XP
+              {sessionReward === null ? "..." : `+${sessionReward.xp} XP`}
             </span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>ストリーク</span>
-            <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "#ff9500" }}>🔥 {currentStreak} {appLang === 'ja' ? '日' : 'jours'}</span>
+            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "ストリーク" : "Streak"}</span>
+            <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "#ff9500" }}>🔥 {currentStreak} {appLang === 'ja' ? '日' : 'days'}</span>
           </div>
-          {currentLevelData?.targetVocabulary && currentLevelData.targetVocabulary.length > 0 && (
+          {sessionReward !== null && sessionReward.vocab > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>新しい単語</span>
-              <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>📚 {currentLevelData.targetVocabulary.length} items</span>
+              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "新出単語" : "New Words"}</span>
+              <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>📚 {sessionReward.vocab} items</span>
             </div>
           )}
         </div>
@@ -1475,23 +1544,28 @@ export default function FuragoApp({
                 onClick={() => openArticle(quizNextEp)}
                 style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
               >
-                次のエピソード
+                {appLang === "ja" ? "次のエピソード" : "Next Episode"}
               </button>
             ) : (
               <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center", display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <span style={{ fontSize: '1.1rem' }}>🏆 シリーズ完了</span>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>このシリーズのすべてのエピソードを読み終えました。</span>
+                <span style={{ fontSize: '1.1rem' }}>{appLang === "ja" ? "🏆 シリーズ完了" : "🏆 Series Completed"}</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{appLang === "ja" ? "このシリーズのすべてのエピソードを読み終えました。" : "You have finished all episodes in this series."}</span>
               </div>
             )
           ) : (
             <button
               onClick={() => {
-                setActiveView("home");
-                window.scrollTo(0,0);
+                const nextArticle = getNextArticle();
+                if (nextArticle) {
+                  openArticle(nextArticle);
+                } else {
+                  setActiveView("home");
+                  window.scrollTo(0,0);
+                }
               }}
               style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
             >
-              次の記事
+              {appLang === "ja" ? "次の記事" : "Next Article"}
             </button>
           )}
           
@@ -1502,7 +1576,7 @@ export default function FuragoApp({
             }}
             style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--bg)", color: "var(--text-main)", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
           >
-            ホームへ戻る
+            {appLang === "ja" ? "ホームへ戻る" : "Back to Home"}
           </button>
         </div>
       </div>
@@ -1595,7 +1669,7 @@ return (
                 <div className="stat-item" title={appLang === 'ja' ? 'ストリーク' : 'Streak'}>
                   <span className="stat-icon">🔥</span>
                   <span className="stat-val">{currentStreak}</span>
-                  <span className="stat-label desktop-only">&nbsp;{appLang === 'ja' ? '日' : 'jours'}</span>
+                  <span className="stat-label desktop-only">&nbsp;{appLang === 'ja' ? '日' : 'days'}</span>
                 </div>
               )}
               {totalXP > 0 && (
@@ -1659,7 +1733,7 @@ return (
 
           <div style={{ padding: '20px 20px 0' }}>
             <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '4px' }}>
-              今日やること
+              {appLang === 'ja' ? '今日やること' : "Today's Tasks"}
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', fontWeight: 600, marginBottom: '24px' }}>
               What should I do today?
@@ -1669,7 +1743,9 @@ return (
             {continueArticle && (
               <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--primary)', fontWeight: 800 }}>続きを読む</h2>
+                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--primary)', fontWeight: 800 }}>
+                    {appLang === 'ja' ? '続きを読む' : 'Continue Reading'}
+                  </h2>
                 </div>
                 <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
                   {continueArticle.imageUrl && (
@@ -1692,7 +1768,7 @@ return (
                   onClick={() => openArticle(continueArticle)}
                   style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
                 >
-                  続きを読む
+                  {appLang === 'ja' ? '続きを読む' : 'Continue Reading'}
                 </button>
               </div>
             )}
@@ -1701,9 +1777,9 @@ return (
             {dailyArticle && (
               <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>今日のミッション</h2>
+                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>{appLang === 'ja' ? '今日のミッション' : "Today's Mission"}</h2>
                   {isMissionCompletedToday && (
-                    <span style={{ background: '#4cd964', color: 'white', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>クリア！</span>
+                    <span style={{ background: '#4cd964', color: 'white', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>{appLang === 'ja' ? 'クリア！' : 'Cleared!'}</span>
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
@@ -1728,11 +1804,11 @@ return (
                     onClick={() => openArticle(dailyArticle)}
                     style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
                   >
-                    読む
+                    {t.reading.read}
                   </button>
                 ) : (
                   <div style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', background: 'rgba(76, 217, 100, 0.15)', color: '#2e7d32', fontSize: '1.05rem', fontWeight: 800, textAlign: 'center' }}>
-                    🎉 今日のミッション完了
+                    {appLang === 'ja' ? '✅ 今日のミッション完了' : "✅ Today's Mission Completed"}
                   </div>
                 )}
               </div>
@@ -1742,9 +1818,11 @@ return (
             {savedWords.length > 0 && (
               <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>🔤 今日の復習</h2>
+                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>{appLang === 'ja' ? '🔤 今日の復習' : "🔤 Today's Review"}</h2>
                   {isVocabReviewCompletedToday && (
-                    <span style={{ background: 'var(--bg)', color: 'var(--text-muted)', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>クリア！</span>
+                    <span style={{ background: 'var(--bg)', color: 'var(--text-muted)', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>
+                      {appLang === 'ja' ? 'クリア！' : 'Cleared!'}
+                    </span>
                   )}
                 </div>
                 <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>{Math.min(5, savedWords.length)} mots</p>
@@ -1752,7 +1830,7 @@ return (
                   onClick={() => startVocabReview("saved")}
                   style={{ width: '100%', padding: '14px', borderRadius: '16px', border: 'none', background: isVocabReviewCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isVocabReviewCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
                 >
-                  {isVocabReviewCompletedToday ? 'もう一度復習する' : 'Réviser'}
+                  {isVocabReviewCompletedToday ? (appLang === 'ja' ? 'もう一度復習する' : 'Review again') : (appLang === 'ja' ? '復習する' : 'Review')}
                 </button>
               </div>
             )}
@@ -1784,13 +1862,13 @@ return (
                   onClick={() => openArticle(currentSeriesNextEp)}
                   style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
                 >
-                  次のエピソード
+                  {appLang === 'ja' ? '次のエピソード' : 'Next Episode'}
                 </button>
               </div>
             )}
 
             <h2 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)', marginTop: '32px', marginBottom: '16px' }}>
-              新着・おすすめ
+              {appLang === 'ja' ? '新着・おすすめ' : 'Latest Articles'}
             </h2>
           </div>
 
@@ -1861,7 +1939,7 @@ return (
                             textTransform: "capitalize"
                           }}
                         >
-                          {typeof article.category === "string" ? article.category : article.category?.[appLang] || "General"}
+                          {typeof article.category === "string" ? article.category : (article.category?.[appLang] || article.category?.ja || "General")}
                         </span>
                         {dateFormatted && (
                           <span
@@ -1938,7 +2016,7 @@ return (
                   fontSize: "0.85rem",
                 }}
               >
-                {typeof currentArticle.category === "string" ? currentArticle.category : (currentArticle.category as TranslatableText | undefined)?.[appLang] || "General"}
+                {typeof currentArticle.category === "string" ? currentArticle.category : ((currentArticle.category as TranslatableText | undefined)?.[appLang] || (currentArticle.category as TranslatableText | undefined)?.ja || "General")}
               </span>
               {currentArticle.date && (
                 <span
@@ -1967,7 +2045,7 @@ return (
           {currentLevelData.learningGoal && (
              <div style={{ marginBottom: "20px", padding: "16px", borderRadius: "16px", background: "rgba(0, 122, 255, 0.05)" }}>
                <h3 style={{ margin: "0 0 8px 0", fontSize: "1.05rem", color: "var(--primary)", fontWeight: 800 }}>
-                 この記事で学ぶこと
+                 {appLang === 'ja' ? 'この記事で学ぶこと' : 'What you will learn'}
                </h3>
                <p style={{ margin: "0", fontSize: "0.95rem", fontWeight: 600, color: "var(--text-main)", lineHeight: "1.5" }}>
                  {typeof currentLevelData.learningGoal === 'string' 
@@ -1979,7 +2057,7 @@ return (
           {currentLevelData.targetVocabulary && currentLevelData.targetVocabulary.length > 0 && (
              <div style={{ marginBottom: "32px", padding: "16px", borderRadius: "16px", background: "var(--bg)", border: "1px solid var(--border)" }}>
                <h3 style={{ margin: "0 0 12px 0", fontSize: "1.05rem", color: "var(--text-main)", fontWeight: 800 }}>
-                 今日の単語
+                 {appLang === 'ja' ? '今日の単語' : "Today's Vocabulary"}
                </h3>
                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                  {currentLevelData.targetVocabulary.slice(0, 5).map((word, i) => (
@@ -2003,7 +2081,21 @@ return (
               <h3>🧠 {appLang === 'ja' ? '理解度チェック' : 'Comprehension Check'}</h3>
               {(() => {
                 const q = currentLevelData.quiz[quizIndex];
-                if (!q.choices && !(Array.isArray(q.options))) {
+                let normalizedChoices: QuizChoice[] = [];
+                
+                if (q.choices) {
+                  normalizedChoices = q.choices;
+                } else if (Array.isArray(q.options)) {
+                  normalizedChoices = q.options as QuizChoice[];
+                } else if (q.options && typeof q.options === 'object') {
+                  normalizedChoices = Object.entries(q.options).map(([k, v]) => ({
+                    id: k,
+                    text: { fr: String(v), ja: String(v), en: String(v) },
+                    isCorrect: q.answer === k
+                  }));
+                }
+                
+                if (normalizedChoices.length === 0) {
                   return null;
                 }
                 
@@ -2045,7 +2137,7 @@ return (
                     {!isQTranslated && <div style={{ height: '16px' }} />}
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {(q.choices || (Array.isArray(q.options) ? q.options : [])).map((choice, cIdx) => {
+                      {normalizedChoices.map((choice, cIdx) => {
                         const key = choice.id || String(cIdx);
                         const isChosen = selectedAnswer === key;
                         const isCorrectOption = choice.isCorrect;
@@ -2151,7 +2243,7 @@ return (
               </div>
               {vocabReviewAnswers[vocabReviewIndex].length === 0 ? (
                 <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--surface)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border)', textAlign: 'center' }}>
-                  <p style={{ fontSize: '1.05rem', color: 'var(--text-muted)', marginBottom: '16px' }}>この単語の意味を確認しましょう</p>
+                  <p style={{ fontSize: '1.05rem', color: 'var(--text-muted)', marginBottom: '16px' }}>{appLang === 'ja' ? 'この単語の意味を確認しましょう' : "Let's check the meaning of this word"}</p>
                   <div style={{ fontSize: '1.5rem', color: 'var(--primary)', fontWeight: 700, marginBottom: '32px' }}>
                     {vocabReviewWords[vocabReviewIndex].conciseDef || vocabReviewWords[vocabReviewIndex].ja}
                   </div>
@@ -2456,7 +2548,7 @@ return (
                       boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
                     }}
                   >
-                    {appLang === "ja" ? "復習する" : "Réviser"}
+                    {appLang === "ja" ? "復習する" : "Review"}
                   </button>
                 )}
               </div>
@@ -2473,7 +2565,7 @@ return (
                   <p style={{ fontSize: "1rem", fontWeight: 600, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
                     {appLang === "ja"
                       ? "まだ学んだ単語はありません。\n記事を読んで完了すると、自動的に追加されます。"
-                      : "Aucun mot appris pour le moment.\nTerminez un article pour enrichir cette liste."}
+                      : "You haven't learned any words yet.\nWords are added automatically when you complete an article."}
                   </p>
                 </div>
               ) : (
@@ -2516,7 +2608,7 @@ return (
                       >
                         {appLang === "ja"
                           ? `${lw.articleIds.length}つの記事から`
-                          : `${lw.articleIds.length} article${lw.articleIds.length > 1 ? "s" : ""}`}
+                          : `From ${lw.articleIds.length} articles`}
                       </span>
                     </div>
                     <button
@@ -3140,6 +3232,19 @@ return (
                         stopAudio();
                         setGlobalLevel(lvl);
                         updateUserState({ level: lvl });
+                        
+                        // Clear any pending quiz progression timeout
+                        if (quizTimerRef.current) {
+                          clearTimeout(quizTimerRef.current);
+                          quizTimerRef.current = null;
+                        }
+                        // Reset transient quiz state to prevent leaking into the new level
+                        setQuizIndex(0);
+                        setQuizScore(0);
+                        setSelectedAnswer(null);
+                        setNoQuizCompleted(false);
+                        setSessionReward(null);
+
                         if (currentArticle && currentArticle.levels[lvl]) {
                           buildQueueForText((currentArticle.levels[lvl].paragraphs || currentArticle.levels[lvl].segments || []));
                         }
@@ -3175,7 +3280,7 @@ return (
                       >
                         {(() => {
                           if (appLang === 'ja') return cat;
-                          const matchedArticle = articles.find(a => (typeof a.category === 'string' ? a.category : a.category?.ja) === cat);
+                          const matchedArticle = articles.find(a => (typeof a.category === 'string' ? a.category : (a.category?.ja || "")).trim() === cat);
                           return matchedArticle && typeof matchedArticle.category !== 'string' && matchedArticle.category?.[appLang] 
                             ? matchedArticle.category[appLang] 
                             : cat;
@@ -3534,7 +3639,7 @@ return (
                       cursor: "pointer",
                     }}
                   >
-                    {leadCheckingEmail ? (appLang === 'ja' ? "確認中..." : "Checking...") : "Next"}
+                    {leadCheckingEmail ? (appLang === 'ja' ? "確認中..." : "Checking...") : (appLang === 'ja' ? '次へ' : 'Next')}
                   </button>
                 </div>
               </div>
