@@ -68,7 +68,11 @@ export const loadUserState = (): UserState => {
     const raw = localStorage.getItem(STATE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return { ...DEFAULT_STATE, ...parsed };
+      const s = { ...DEFAULT_STATE, ...parsed };
+      if (!["LVL_1", "LVL_2", "LVL_3", "LVL_4"].includes(s.level)) {
+        s.level = "LVL_1";
+      }
+      return s;
     }
 
     // Migration
@@ -80,6 +84,18 @@ export const loadUserState = (): UserState => {
       try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(def)); }
       catch { return def; }
     };
+
+    const legacyLevel = readString("furago_level");
+    if (legacyLevel === "A1") state.level = "LVL_1";
+    else if (legacyLevel === "A2") state.level = "LVL_2";
+    else if (legacyLevel === "B1") state.level = "LVL_3";
+    else if (legacyLevel === "B2" || legacyLevel === "C1") state.level = "LVL_4";
+    else if (legacyLevel) state.level = legacyLevel;
+    
+    // Ensure normalization if someone manually tampered with it
+    if (!["LVL_1", "LVL_2", "LVL_3", "LVL_4"].includes(state.level)) {
+      state.level = "LVL_1";
+    }
 
     state.dailyMissionCompletedDate = readString("furago_daily_completed_date");
     state.vocabReviewXPDate = readString("furago_xp_vocab_date");

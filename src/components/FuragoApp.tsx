@@ -549,6 +549,7 @@ export default function FuragoApp({
     // Load centralized user state
     try {
       const state = loadUserState();
+      setGlobalLevel(state.level);
       setLastCompletedDate(state.dailyMissionCompletedDate);
       setLastVocabReviewDate(state.vocabReviewXPDate);
       setLastOpenedArticleId(state.lastOpenedArticleId);
@@ -2852,6 +2853,7 @@ return (
                       onClick={() => {
                         stopAudio();
                         setGlobalLevel(lvl);
+                        updateUserState({ level: lvl });
                         if (currentArticle && currentArticle.levels[lvl]) {
                           buildQueueForText((currentArticle.levels[lvl].paragraphs || currentArticle.levels[lvl].segments || []));
                         }
