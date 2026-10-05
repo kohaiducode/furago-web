@@ -1014,7 +1014,7 @@ export default function FuragoApp({
     }
 
     setLeadStep(1);
-    setLeadLevel("A1");
+    setLeadLevel("LVL_1");
     setLeadModalOpen(true);
   };
 
@@ -1225,6 +1225,10 @@ export default function FuragoApp({
 
   const progressPercent =
     ttsQueue.length > 0 ? ((queueIndex + 1) / ttsQueue.length) * 100 : 0;
+
+  const quizNextEp = (activeView === "reading" && currentArticle?.seriesId) ? articles
+    .filter(a => a.seriesId === currentArticle.seriesId && (a.seriesOrder || 0) > (currentArticle.seriesOrder || 0))
+    .sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0))[0] : null;
 
   return (
     <div className="app-shell">
@@ -1754,29 +1758,18 @@ export default function FuragoApp({
 
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     {currentArticle.seriesId ? (
-                      (() => {
-                        const nextEp = articles
-                          .filter(a => a.seriesId === currentArticle.seriesId && (a.seriesOrder || 0) > (currentArticle.seriesOrder || 0))
-                          .sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0))[0];
-                        if (nextEp) {
-                          return (
-                            <button
-                              onClick={() => {
-                                openArticle(nextEp);
-                              }}
-                              style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-                            >
-                              次のエピソード
-                            </button>
-                          );
-                        } else {
-                          return (
-                            <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center" }}>
-                              🏆 シリーズ完結 (Series Completed)
-                            </div>
-                          );
-                        }
-                      })()
+                      quizNextEp ? (
+                        <button
+                          onClick={() => openArticle(quizNextEp)}
+                          style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+                        >
+                          次のエピソード
+                        </button>
+                      ) : (
+                        <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center" }}>
+                          🏆 シリーズ完結 (Series Completed)
+                        </div>
+                      )
                     ) : (
                       <button
                         onClick={() => {
@@ -3097,28 +3090,23 @@ export default function FuragoApp({
                     marginBottom: "22px",
                   }}
                 >
-                  {[
-                    { code: "LVL_1", desc: "Absolute Beginner" },
-                    { code: "LVL_2", desc: "Beginner" },
-                    { code: "LVL_3", desc: "Intermediate" },
-                    { code: "LVL_4", desc: "Advanced" }
-                  ].map((item) => (
+                  {["LVL_1", "LVL_2", "LVL_3", "LVL_4"].map((code) => (
                     <button
-                      key={item.code}
+                      key={code}
                       type="button"
                       onClick={() => {
-                        setLeadLevel(item.code);
+                        setLeadLevel(code);
                         setLeadError(null);
                       }}
                       style={{
                         padding: "12px 14px",
                         borderRadius: "12px",
                         border:
-                          leadLevel === item.code
+                          leadLevel === code
                             ? "2px solid var(--primary)"
                             : "2px solid var(--border)",
                         background:
-                          leadLevel === item.code
+                          leadLevel === code
                             ? "var(--primary-light)"
                             : "var(--surface)",
                         textAlign: "left",
@@ -3129,9 +3117,9 @@ export default function FuragoApp({
                       }}
                     >
                       <span style={{ fontWeight: 600 }}>
-                        {t.levels[item.code as keyof typeof t.levels]}
+                        {t.levels[code as keyof typeof t.levels]}
                       </span>
-                      {leadLevel === item.code && <span>✔️</span>}
+                      {leadLevel === code && <span>✔️</span>}
                     </button>
                   ))}
                 </div>

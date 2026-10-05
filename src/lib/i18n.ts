@@ -102,8 +102,8 @@ export const translations = {
   en: {
     appTitle: 'Furago',
     levels: {
-      LVL_1: 'Beginner',
-      LVL_2: 'Elementary',
+      LVL_1: 'Absolute Beginner',
+      LVL_2: 'Beginner',
       LVL_3: 'Intermediate',
       LVL_4: 'Advanced'
     },
