@@ -22,8 +22,16 @@ export interface WordList {
  * Intentionally minimal: definitions/translations stay in the global dictionary.
  */
 export interface LearnedWord {
-  word: string; // canonical French lemma
-  articleIds: string[]; // articles that contributed this word
+  word: string;
+  articleIds: string[];
+  firstLearnedAt: number;
+  lastReviewedAt: number | null;
+  dueAt: number;
+  interval: number;
+  difficulty: "easy" | "normal" | "hard";
+  correctCount: number;
+  wrongCount: number;
+  reviewStreak: number;
 }
 
 export interface UserState {
@@ -40,10 +48,11 @@ export interface UserState {
   lastActivityDate: string | null;
   xp: number;
   furagoLevel: number;
-  dailyMissionCompletedDate: string; // previously furago_daily_completed_date
-  dailyMissionXPDate: string; // previously furago_xp_daily_date
-  vocabReviewXPDate: string; // previously furago_xp_vocab_date
-  lastOpenedArticleId: string; // previously furago_last_opened_articleId
+  dailyMissionTarget?: { date: string; articleId: string; level: string };
+  dailyMissionCompletedDate: string;
+  dailyMissionXPDate: string;
+  vocabReviewXPDate: string;
+  lastOpenedArticleId: string;
   articleProgress: Record<string, number>;
 }
 
@@ -194,7 +203,7 @@ export const mergeLearnedVocabulary = (
       }
     } else {
       index.set(key, result.length);
-      result.push({ word, articleIds: [articleId] });
+      result.push({ word, articleIds: [articleId], firstLearnedAt: Date.now(), lastReviewedAt: null, dueAt: Date.now(), interval: 0, correctCount: 0, wrongCount: 0, difficulty: 'normal', reviewStreak: 0 });
     }
   }
   return result;

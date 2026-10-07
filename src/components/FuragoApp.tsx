@@ -1,6 +1,9 @@
 "use client";
 
 import { loadUserState, updateUserState, UserState, LearnedWord, mergeLearnedVocabulary } from "../lib/userState";
+import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset } from "../lib/home";
+import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
+import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "../lib/analytics";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
 
@@ -125,14 +128,15 @@ const TargetVocabularyItem = ({ word, onClick }: { word: string, onClick: (e: Re
   }, [word]);
 
   return (
-    <div 
+    <button 
+      type="button"
       onClick={(e) => onClick(e, word, "")}
-      style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", borderRadius: "12px", background: "var(--surface)", cursor: "pointer", border: "1px solid var(--border)", transition: "all 0.2s" }}
-      className="target-vocab-item tap-word"
+      style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", borderRadius: "12px", background: "var(--surface)", cursor: "pointer", border: "1px solid var(--border)", transition: "all 0.2s", width: "100%", textAlign: "left" }}
+      className="target-vocab-item tap-word reset-button"
     >
       <span style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--primary)" }}>{word}</span>
       <span style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 600 }}>{def}</span>
-    </div>
+    </button>
   );
 };
 export default function FuragoApp({
@@ -142,6 +146,67 @@ export default function FuragoApp({
 }) {
   // Navigation & Views: "home" | "reading" | "words"
   const [activeView, setActiveView] = useState<"home" | "reading" | "words" | "vocab_review">("home");
+
+  // Track if events have been fired to prevent duplicate events on React re-renders
+  const analyticsFiredRef = useRef<Record<string, boolean>>({});
+
+  // Throttle activity updates
+  useEffect(() => {
+    let lastUpdate = Date.now();
+    const handleActivity = () => {
+      const now = Date.now();
+      if (now - lastUpdate > 60000) { // Max once per minute
+        updateSessionActivity();
+        lastUpdate = now;
+      }
+    };
+    
+    window.addEventListener("pointerdown", handleActivity, { passive: true });
+    window.addEventListener("keydown", handleActivity, { passive: true });
+    document.addEventListener("visibilitychange", handleActivity, { passive: true });
+    
+    return () => {
+      window.removeEventListener("pointerdown", handleActivity);
+      window.removeEventListener("keydown", handleActivity);
+      document.removeEventListener("visibilitychange", handleActivity);
+    };
+  }, []);
+
+  // --- History API Layer ---
+  const navigateTo = useCallback((view: typeof activeView, params?: Record<string, string>, replace = false) => {
+    if (typeof window === "undefined") {
+      setActiveView(view);
+      return;
+    }
+    const query = new URLSearchParams();
+    query.set("view", view);
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v) query.set(k, v);
+      });
+    }
+    const url = `/?${query.toString()}`;
+    const currentState = window.history.state || {};
+    const historyIdx = replace ? (currentState.historyIdx || 0) : ((currentState.historyIdx || 0) + 1);
+    
+    const newState = { furago: true, view, historyIdx, ...params };
+    if (replace) {
+      window.history.replaceState(newState, "", url);
+    } else {
+      window.history.pushState(newState, "", url);
+    }
+    setActiveView(view);
+  }, []);
+
+  const handleBack = useCallback((fallbackView: typeof activeView) => {
+    if (typeof window !== "undefined" && window.history.state?.historyIdx > 0) {
+      window.history.back();
+    } else {
+      navigateTo(fallbackView, undefined, true);
+    }
+  }, [navigateTo]);
+
+
 
   // i18n States
   const [appLang, setAppLang] = useState<AppLanguage>(() => {
@@ -165,11 +230,90 @@ export default function FuragoApp({
 
 
   // Articles & Filters
+    const [userState, setReactUserState] = useState<UserState>(() => {
+    if (typeof window !== 'undefined') return loadUserState();
+    return {
+      level: "LVL_1",
+      savedVocabulary: [],
+      learnedVocabulary: [],
+      wordLists: [{ id: "default", name: "すべて" }],
+      completedArticles: [],
+      quizResults: [],
+      perfectQuizResults: [],
+      currentStreak: 0,
+      longestStreak: 0,
+      lastStreakDate: "",
+      lastActivityDate: null,
+      xp: 0,
+      furagoLevel: 1,
+      dailyMissionCompletedDate: "",
+      dailyMissionXPDate: "",
+      vocabReviewXPDate: "",
+      lastOpenedArticleId: "",
+      articleProgress: {},
+    };
+  });
+
+  const userStateRef = useRef<UserState>(userState);
+
+  const mutateUserState = useCallback((updater: Partial<UserState> | ((prev: UserState) => Partial<UserState>)) => {
+    const prev = userStateRef.current;
+    const updates = typeof updater === 'function' ? updater(prev) : updater;
+    if (!updates || Object.keys(updates).length === 0) return;
+    
+    const next = { ...prev, ...updates };
+    if (updates.xp !== undefined) {
+      next.furagoLevel = Math.max(1, Math.floor(next.xp / 100) + 1);
+    }
+    
+    userStateRef.current = next;
+    import('../lib/userState').then(m => m.saveUserState(next));
+    setReactUserState(next);
+  }, []);
+
+  const {
+    level: globalLevel,
+    wordLists,
+    savedVocabulary: savedWords,
+    learnedVocabulary: learnedWords,
+    dailyMissionCompletedDate: lastCompletedDate,
+    vocabReviewXPDate: lastVocabReviewDate,
+    lastOpenedArticleId,
+    currentStreak,
+    longestStreak,
+    lastStreakDate,
+    xp: totalXP,
+    furagoLevel,
+    completedArticles: completedArticleIds,
+    articleProgress: articleProgressMap
+  } = userState;
+
+
   const [articles, setArticles] = useState<Article[]>(initialArticles || []);
-  const [globalLevel, setGlobalLevel] = useState<string>("LVL_1");
+  const [catalogStatus, setCatalogStatus] = useState<"loading" | "success" | "offline" | "error">(
+    (initialArticles && initialArticles.length > 0) ? "success" : "loading"
+  );
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [filterModalType, setFilterModalType] = useState<"level" | "category" | null>(null);
+  const filterDialogRef = useRef<HTMLDialogElement>(null);
+  const filterTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (filterModalType !== null) {
+      if (filterDialogRef.current && !filterDialogRef.current.open) {
+        filterDialogRef.current.showModal();
+        // Focus first button (either level or close button)
+      }
+    } else {
+      if (filterDialogRef.current && filterDialogRef.current.open) {
+        filterDialogRef.current.close();
+      }
+      if (filterTriggerRef.current && document.contains(filterTriggerRef.current)) {
+        filterTriggerRef.current.focus();
+      }
+    }
+  }, [filterModalType]);
 
   // Current Reading Article
   const [currentArticle, setCurrentArticle] = useState<Article | null>(null);
@@ -209,23 +353,75 @@ export default function FuragoApp({
   const [dictRect, setDictRect] = useState<DOMRect | null>(null);
   const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({});
   const [arrowTop, setArrowTop] = useState<boolean>(false);
-  const popupRef = useRef<HTMLDivElement | null>(null);
+  const popupRef = useRef<HTMLDialogElement | null>(null);
+  const dictTriggerRef = useRef<HTMLElement | null>(null);
 
   // Word Lists & Saved Words (単語帳)
-  const [wordLists, setWordLists] = useState<WordList[]>([
-    { id: "default", name: "デフォルト" },
-  ]);
-  const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
+  
   // System list (read-only): words Furago considers learned from completed articles.
-  const [learnedWords, setLearnedWords] = useState<LearnedWord[]>([]);
   const [currentListId, setCurrentListId] = useState<string | null>(null);
   const [listSelectorOpen, setListSelectorOpen] = useState<boolean>(false);
+  const listSelectorDialogRef = useRef<HTMLDialogElement>(null);
+  const listSelectorTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const dialog = listSelectorDialogRef.current;
+    if (listSelectorOpen) {
+      if (dialog && !dialog.open) {
+        dialog.showModal();
+      }
+    } else {
+      if (dialog && dialog.open) {
+        dialog.close();
+      }
+      if (listSelectorTriggerRef.current && document.contains(listSelectorTriggerRef.current)) {
+        listSelectorTriggerRef.current.focus();
+      }
+    }
+  }, [listSelectorOpen]);
   const [newListModalOpen, setNewListModalOpen] = useState<boolean>(false);
   const [newListName, setNewListName] = useState<string>("");
+  const newListDialogRef = useRef<HTMLDialogElement>(null);
+  const newListTriggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const dialog = newListDialogRef.current;
+    if (newListModalOpen) {
+      if (dialog && !dialog.open) {
+        dialog.showModal();
+      }
+    } else {
+      if (dialog && dialog.open) {
+        dialog.close();
+      }
+      if (newListTriggerRef.current && document.contains(newListTriggerRef.current)) {
+        newListTriggerRef.current.focus();
+      }
+    }
+  }, [newListModalOpen]);
 
   // Email Lead Bar, Multi-step Profile Modal & Toast
   const [showLeadBar, setShowLeadBar] = useState<boolean>(false);
   const [leadModalOpen, setLeadModalOpen] = useState<boolean>(false);
+  const leadDialogRef = useRef<HTMLDialogElement>(null);
+  const leadTriggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const dialog = leadDialogRef.current;
+    if (leadModalOpen) {
+      if (dialog && !dialog.open) {
+        dialog.showModal();
+      }
+    } else {
+      if (dialog && dialog.open) {
+        dialog.close();
+      }
+      if (leadTriggerRef.current && document.contains(leadTriggerRef.current)) {
+        leadTriggerRef.current.focus();
+      }
+    }
+  }, [leadModalOpen]);
+
   const [leadStep, setLeadStep] = useState<1 | 2 | 3>(1);
   const [leadEmail, setLeadEmail] = useState<string>("");
   const [leadFirstName, setLeadFirstName] = useState<string>("");
@@ -236,22 +432,13 @@ export default function FuragoApp({
   const [leadError, setLeadError] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  const [lastCompletedDate, setLastCompletedDate] = useState<string>("");
-  const [lastVocabReviewDate, setLastVocabReviewDate] = useState<string>("");
-  const [lastOpenedArticleId, setLastOpenedArticleId] = useState<string>("");
-
   const todayStr = new Date().toLocaleDateString("en-CA"); // local timezone YYYY-MM-DD
   const isMissionCompletedToday = lastCompletedDate === todayStr;
   const isVocabReviewCompletedToday = lastVocabReviewDate === todayStr;
 
-  const [currentStreak, setCurrentStreak] = useState<number>(0);
-  const [longestStreak, setLongestStreak] = useState<number>(0);
-  const [lastStreakDate, setLastStreakDate] = useState<string>("");
-
-
   const updateStreak = useCallback(() => {
     const today = new Date().toLocaleDateString("en-CA");
-    const state = loadUserState();
+    const state = userStateRef.current;
     const storedDate = state.lastStreakDate;
     if (storedDate === today) return;
 
@@ -275,16 +462,12 @@ export default function FuragoApp({
     }
 
     ls = Math.max(ls, cs);
-    updateUserState({
+    mutateUserState({
       currentStreak: cs,
       longestStreak: ls,
       lastStreakDate: today,
     });
-    
-    setCurrentStreak(cs);
-    setLongestStreak(ls);
-    setLastStreakDate(today);
-  }, []);
+  }, [mutateUserState]);
 
   // XP State and logic
 
@@ -306,137 +489,158 @@ export default function FuragoApp({
     return { members, currentIndex, total: members.length, nextEp };
   }, [articles]);
 
-  const [totalXP, setTotalXP] = useState<number>(0);
 
-  const addXP = useCallback((amount: number) => {
-    const nextState = updateUserState({ xp: loadUserState().xp + amount });
-    setTotalXP(nextState.xp);
-  }, []);
 
   const checkAndAwardArticleXP = useCallback((articleId: string, targetVocab?: string[]) => {
-    const state = loadUserState();
-    const done = [...state.completedArticles];
-    const progressKey = `${articleId}::${globalLevel}`;
-    const newProgress = { ...state.articleProgress };
-    let shouldUpdate = false;
-    let newLearnedVocab = state.learnedVocabulary;
-    
+    const state = userStateRef.current;
+    const updates: Partial<import("../lib/userState").UserState> = {};
     let awardedXP = 0;
     let newVocabCount = 0;
 
+    const done = [...state.completedArticles];
+    const progressKey = `${articleId}::${state.level}`;
+    const newProgress = { ...state.articleProgress };
+
     if (newProgress[progressKey] !== undefined) {
       delete newProgress[progressKey];
-      shouldUpdate = true;
+      updates.articleProgress = newProgress;
     }
 
     if (!done.includes(articleId)) {
       done.push(articleId);
-      addXP(20);
+      updates.completedArticles = done;
       awardedXP += 20;
-      
+
       if (targetVocab && targetVocab.length > 0) {
         const oldLen = state.learnedVocabulary.length;
-        newLearnedVocab = mergeLearnedVocabulary(state.learnedVocabulary, targetVocab, articleId);
+        const newLearnedVocab = mergeLearnedVocabulary(state.learnedVocabulary, targetVocab, articleId);
+        updates.learnedVocabulary = newLearnedVocab;
         newVocabCount = newLearnedVocab.length - oldLen;
       }
-      
-      shouldUpdate = true;
     }
     
-    if (shouldUpdate) {
-      updateUserState({ completedArticles: done, articleProgress: newProgress, learnedVocabulary: newLearnedVocab });
+    if (awardedXP > 0) {
+      updates.xp = state.xp + awardedXP;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      mutateUserState(updates);
     }
     
     return { awardedXP, newVocabCount };
-  }, [addXP, globalLevel]);
+  }, [mutateUserState]);
 
   const checkAndAwardQuizXP = useCallback((articleId: string, isPerfect: boolean) => {
-    const state = loadUserState();
-    let updated = false;
-    const nextState: Partial<import("../lib/userState").UserState> = {};
+    const state = userStateRef.current;
+    const updates: Partial<import("../lib/userState").UserState> = {};
     let awardedXP = 0;
     
     const doneQ = [...state.quizResults];
     if (!doneQ.includes(articleId)) {
       doneQ.push(articleId);
-      nextState.quizResults = doneQ;
-      addXP(10);
+      updates.quizResults = doneQ;
       awardedXP += 10;
-      updated = true;
     }
+    
     if (isPerfect) {
       const doneP = [...state.perfectQuizResults];
       if (!doneP.includes(articleId)) {
         doneP.push(articleId);
-        nextState.perfectQuizResults = doneP;
-        addXP(5);
+        updates.perfectQuizResults = doneP;
         awardedXP += 5;
-        updated = true;
       }
     }
-    if (updated) {
-      updateUserState(nextState);
+    
+    if (awardedXP > 0) {
+      updates.xp = state.xp + awardedXP;
     }
+
+    if (Object.keys(updates).length > 0) {
+      mutateUserState(updates);
+    }
+    
     return awardedXP;
-  }, [addXP]);
+  }, [mutateUserState]);
 
   const checkAndAwardDailyMissionXP = useCallback(() => {
-    const state = loadUserState();
+    const state = userStateRef.current;
     const lastDate = state.dailyMissionXPDate;
     const today = new Date().toLocaleDateString("en-CA");
     if (lastDate !== today) {
-      updateUserState({ dailyMissionXPDate: today });
-      addXP(10);
+      mutateUserState({ dailyMissionXPDate: today, xp: state.xp + 10 });
       return 10;
     }
     return 0;
-  }, [addXP]);
+  }, [mutateUserState]);
 
   const checkAndAwardVocabReviewXP = useCallback(() => {
-    const state = loadUserState();
-    const lastDate = state.vocabReviewXPDate;
     const today = new Date().toLocaleDateString("en-CA");
-    if (lastDate !== today) {
-      updateUserState({ vocabReviewXPDate: today });
-      setLastVocabReviewDate(today);
-      addXP(10);
-    }
-  }, [addXP]);
+    mutateUserState((prev) => {
+      if (prev.vocabReviewXPDate !== today) {
+        return { vocabReviewXPDate: today, xp: prev.xp + 10 };
+      }
+      return {};
+    });
+  }, [mutateUserState]);
 
   const [vocabReviewIndex, setVocabReviewIndex] = useState(0);
+  const [vocabReviewCorrectCount, setVocabReviewCorrectCount] = useState(0);
   const [vocabReviewWords, setVocabReviewWords] = useState<SavedWord[]>([]);
   const [vocabReviewAnswers, setVocabReviewAnswers] = useState<string[][]>([]);
   const [vocabReviewSelected, setVocabReviewSelected] = useState<string | null>(null);
-  const [vocabReviewReturnTo, setVocabReviewReturnTo] = useState<"home" | "words">("home");
+  const [vocabReviewReturnTo, setVocabReviewReturnTo] = useState<"home" | "words" | "reading">("home");
+  const [vocabReviewSource, setVocabReviewSource] = useState<"saved" | "learned">("saved");
 
-  const startVocabReview = async (source: "saved" | "learned" = "saved") => {
+  const handleRecordReviewResult = useCallback((word: SavedWord, isCorrect: boolean) => {
+    // Only record SRS results for genuine learned/SRS words
+    const isSRSWord = vocabReviewSource === "learned" || word.listId === "learned";
+    if (!isSRSWord) return;
+
+    mutateUserState((prev) => {
+      const currentLearned = prev.learnedVocabulary || [];
+      const lwIndex = currentLearned.findIndex(
+        (w) => w.word.toLowerCase() === word.fr.toLowerCase()
+      );
+      if (lwIndex === -1) return {};
+
+      const nextLw = recordReviewResult(currentLearned[lwIndex], isCorrect);
+      const newLearned = [...currentLearned];
+      newLearned[lwIndex] = nextLw;
+      return { learnedVocabulary: newLearned };
+    });
+  }, [vocabReviewSource, mutateUserState]);
+
+  const startVocabReview = async (source: "saved" | "learned" = "saved", returnTo: "home" | "words" | "reading" = "home") => {
+    setVocabReviewSource(source);
     let sourceWords: import("../lib/userState").SavedWord[] = [];
-    
+
     if (source === "saved") {
       sourceWords = savedWords;
     } else {
-      if (learnedWords.length === 0) return;
+      const currentLearned = learnedWords;
+      if (currentLearned.length === 0) return;
       
-      const shuffledLearned = [...learnedWords].sort(() => 0.5 - Math.random());
+      const dueWords = getWordsDueForReview(currentLearned, Date.now());
+      const wordsToReview = dueWords.slice(0, 5); // limit to 5 per session
+      
+      trackEvent("srs_session_started", { due_count: wordsToReview.length });
+      
       const resolvedWords: import("../lib/userState").SavedWord[] = [];
       
-      for (const lw of shuffledLearned) {
+      for (const lw of wordsToReview) {
          const dictRes = await DictionaryService.lookupWord(lw.word, "");
-         if (dictRes && (dictRes.conciseDef || dictRes.definitions?.length > 0)) {
-            resolvedWords.push({
-               fr: lw.word,
-               originalWord: lw.word,
-               conciseDef: dictRes.conciseDef || dictRes.definitions?.[0] || "",
-               ja: "",
-               nature: dictRes.nature || "",
-               gender: dictRes.gender || "",
-               phraseOriginale: dictRes.phraseOriginale || "",
-               traductionPhrase: dictRes.traductionPhrase || "",
-               date: new Date().toLocaleDateString("en-CA"),
-               listId: "learned"
-            });
-            if (resolvedWords.length === 5) break;
-         }
+         resolvedWords.push({
+            fr: lw.word,
+            originalWord: lw.word,
+            conciseDef: dictRes?.conciseDef || dictRes?.definitions?.[0] || "",
+            ja: "",
+            nature: dictRes?.nature || "",
+            gender: dictRes?.gender || "",
+            phraseOriginale: dictRes?.phraseOriginale || "",
+            traductionPhrase: dictRes?.traductionPhrase || "",
+            date: new Date().toLocaleDateString("en-CA"),
+            listId: "learned"
+         });
       }
       sourceWords = resolvedWords;
     }
@@ -445,28 +649,40 @@ export default function FuragoApp({
       setVocabReviewWords([]);
       setVocabReviewAnswers([]);
       setVocabReviewIndex(0);
+      setVocabReviewCorrectCount(0);
       setVocabReviewSelected(null);
-      setVocabReviewReturnTo(source === "saved" ? "home" : "words");
-      setActiveView("vocab_review");
-      window.scrollTo(0,0);
+      setVocabReviewReturnTo(returnTo);
+      navigateTo("vocab_review", { returnTo });
       return;
     }
 
-    const shuffled = [...sourceWords].sort(() => 0.5 - Math.random());
-    
-    // Avoid selecting the exact same French word more than once in one review session
-    const uniqueFrSelected: import("../lib/userState").SavedWord[] = [];
-    const seenFr = new Set<string>();
-    for (const w of shuffled) {
-      if (!seenFr.has(w.fr)) {
-        seenFr.add(w.fr);
-        uniqueFrSelected.push(w);
+    let selected = [...sourceWords];
+    if (source === "saved") {
+      selected = [...sourceWords].sort(() => 0.5 - Math.random());
+      const uniqueFrSelected: import("../lib/userState").SavedWord[] = [];
+      const seenFr = new Set<string>();
+      for (const w of selected) {
+        if (!seenFr.has(w.fr)) {
+          seenFr.add(w.fr);
+          uniqueFrSelected.push(w);
+        }
+        if (uniqueFrSelected.length === 5) break;
       }
-      if (uniqueFrSelected.length === 5) break;
+      selected = uniqueFrSelected;
     }
-    const selected = uniqueFrSelected;
+    // Note: for "learned", 'selected' is already deterministic and unique based on SRS!
 
-    const allMeanings = Array.from(new Set(sourceWords.map(w => w.conciseDef || w.ja).filter(Boolean)));
+    const poolSource = source === "saved" ? savedWords : learnedWords.map(w => ({ conciseDef: "" })); // we need distracters!
+    // Wait, let's just use Dictionary definitions for distracters or previous answers
+    let allMeanings: string[] = [];
+    if (source === "saved") {
+        allMeanings = Array.from(new Set(savedWords.map(w => w.conciseDef || w.ja).filter(Boolean)));
+    } else {
+        // Fallback: we need distracters for learned words. We can just use definitions from the resolved words themselves, or fetch random ones.
+        // Actually, let's use the resolved words + some random saved words meanings if needed.
+        const pool = [...selected, ...savedWords.slice(0, 20)];
+        allMeanings = Array.from(new Set(pool.map(w => w.conciseDef || w.ja).filter(Boolean)));
+    }
     
     const optionsList = selected.map(word => {
        const correctMeaning = word.conciseDef || word.ja;
@@ -489,40 +705,119 @@ export default function FuragoApp({
     setVocabReviewWords(selected);
     setVocabReviewAnswers(optionsList);
     setVocabReviewIndex(0);
+    setVocabReviewCorrectCount(0);
     setVocabReviewSelected(null);
-    setVocabReviewReturnTo(source === "saved" ? "home" : "words");
-    setActiveView("vocab_review");
-    window.scrollTo(0,0);
+    setVocabReviewReturnTo(returnTo);
+    navigateTo("vocab_review", { returnTo });
   };
 
 
-  const dailyArticle = React.useMemo(() => {
-    const available = articles.filter(a => a.levels && a.levels[globalLevel]);
-    if (available.length === 0) return null;
-    
-    const sorted = [...available].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    
-    const state = typeof window !== "undefined" ? loadUserState() : null;
-    const completed = state?.completedArticles || [];
-    
-    const uncompleted = sorted.filter(a => !completed.includes(String(a.id)));
-    const validPool = uncompleted.length > 0 ? uncompleted : sorted;
-    
-    const featured = validPool.filter(a => a.featured);
-    const pool = featured.length > 0 ? featured : validPool;
-    
-    const seed = new Date(todayStr).getTime() / 86400000;
-    const index = Math.abs(Math.floor(seed)) % pool.length;
-    return pool[index];
-  }, [articles, globalLevel, todayStr]);
+  useEffect(() => {
+    if (articles.length === 0) return;
+    const target = userState.dailyMissionTarget;
+    if (!target || target.date !== todayStr || target.level !== globalLevel) {
+      const available = articles.filter(a => a.levels && a.levels[globalLevel]);
+      if (available.length === 0) return;
+      const sorted = [...available].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+      const uncompleted = sorted.filter(a => !completedArticleIds.includes(String(a.id)));
+      const validPool = uncompleted.length > 0 ? uncompleted : sorted;
+      const featured = validPool.filter(a => a.featured);
+      const pool = featured.length > 0 ? featured : validPool;
+      const seed = new Date(todayStr).getTime() / 86400000;
+      const index = Math.abs(Math.floor(seed)) % pool.length;
+      const selected = pool[index];
+      
+      mutateUserState(s => ({
+        dailyMissionTarget: { date: todayStr, articleId: String(selected.id), level: globalLevel }
+      }));
+    }
+  }, [articles, globalLevel, todayStr, userState.dailyMissionTarget, completedArticleIds, mutateUserState]);
 
+  const dailyArticle = React.useMemo(() => {
+    const target = userState.dailyMissionTarget;
+    if (!target || target.date !== todayStr || target.level !== globalLevel) return null;
+    return articles.find(a => String(a.id) === target.articleId) || null;
+  }, [articles, userState.dailyMissionTarget, todayStr, globalLevel]);
+
+
+
+  // Time state for pure rendering of SRS counts
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const update = () => setNowMs(Date.now());
+    const id = setInterval(update, 60000);
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+    };
+  }, []);
+
+    // --- Home Scroll Restoration ---
+  useEffect(() => {
+    if (activeView !== "home") return;
+    if (typeof window === "undefined") return;
+
+    const idx = window.history.state?.historyIdx || 0;
+    let rafId: number | null = null;
+
+    const saved = sessionStorage.getItem("furago_home_scroll_" + idx);
+    if (saved) {
+      const pos = parseInt(saved, 10);
+      if (!isNaN(pos) && pos > 0) {
+        let attempts = 0;
+        const MAX_ATTEMPTS = 15;
+        const tolerance = 50;
+
+        const tryRestore = () => {
+          attempts++;
+          const currentHeight = document.documentElement.scrollHeight;
+          const viewportHeight = window.innerHeight;
+
+          if (currentHeight >= pos + viewportHeight - tolerance || attempts >= MAX_ATTEMPTS) {
+            window.scrollTo({ top: pos, behavior: "instant" });
+          } else {
+            rafId = requestAnimationFrame(tryRestore);
+          }
+        };
+        rafId = requestAnimationFrame(tryRestore);
+      } else if (pos === 0) {
+        window.scrollTo({ top: 0, behavior: "instant" });
+      }
+    } else {
+      window.scrollTo({ top: 0, behavior: "instant" });
+    }
+
+    let scrollTimeout: NodeJS.Timeout | null = null;
+    const handleHomeScroll = () => {
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        sessionStorage.setItem("furago_home_scroll_" + idx, window.scrollY.toString());
+        scrollTimeout = null;
+      }, 150);
+    };
+
+    window.addEventListener("scroll", handleHomeScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleHomeScroll);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      if (scrollTimeout) {
+        clearTimeout(scrollTimeout);
+        sessionStorage.setItem("furago_home_scroll_" + idx, window.scrollY.toString());
+      }
+    };
+  }, [activeView]);
 
   // --- Reading Progress Tracking & Restoration ---
   useEffect(() => {
     if (activeView !== "reading" || !currentArticle) return;
 
     const progressKey = `${currentArticle.id}::${globalLevel}`;
-    const state = loadUserState();
+    const state = userStateRef.current;
     const savedRatio = state.articleProgress?.[progressKey];
 
     // Restore position after initial render
@@ -553,7 +848,7 @@ export default function FuragoApp({
         // Only save if meaningful movement (e.g., beyond the top 5% or restoring)
         if (ratio > 0.05 || ratio === 0) {
           const currentState = loadUserState();
-          updateUserState({
+          mutateUserState({
             articleProgress: {
               ...currentState.articleProgress,
               [progressKey]: ratio
@@ -585,10 +880,13 @@ export default function FuragoApp({
               currentArticle.id.toString(),
               currentArticle.levels[globalLevel]?.targetVocabulary
             );
+            
+            trackEvent("article_completed", { article_id: String(currentArticle.id) });
+            
             let totalXP = artRes.awardedXP;
             if (dailyArticle && currentArticle.id === dailyArticle.id) {
-              updateUserState({ dailyMissionCompletedDate: todayStr });
-              setLastCompletedDate(todayStr);
+              mutateUserState({ dailyMissionCompletedDate: todayStr });
+              trackEvent("mission_completed", { article_id: String(currentArticle.id) });
               totalXP += checkAndAwardDailyMissionXP();
             }
             setSessionReward({ xp: totalXP, vocab: artRes.newVocabCount });
@@ -601,11 +899,14 @@ export default function FuragoApp({
             currentArticle.id.toString(),
             currentArticle.levels[globalLevel]?.targetVocabulary
           );
+          
+          trackEvent("article_completed", { article_id: String(currentArticle.id) });
+          
           let totalXP = artRes.awardedXP;
           totalXP += checkAndAwardQuizXP(currentArticle.id.toString(), quizScore === q.length);
           if (dailyArticle && currentArticle.id === dailyArticle.id) {
-            updateUserState({ dailyMissionCompletedDate: todayStr });
-            setLastCompletedDate(todayStr);
+            mutateUserState({ dailyMissionCompletedDate: todayStr });
+            trackEvent("mission_completed", { article_id: String(currentArticle.id) });
             totalXP += checkAndAwardDailyMissionXP();
           }
           setSessionReward({ xp: totalXP, vocab: artRes.newVocabCount });
@@ -615,23 +916,17 @@ export default function FuragoApp({
   }, [activeView, currentArticle, globalLevel, quizIndex, quizScore, updateStreak, checkAndAwardArticleXP, checkAndAwardQuizXP, noQuizCompleted, dailyArticle, todayStr, checkAndAwardDailyMissionXP, sessionReward]);
 
   const { continueArticle, currentSeriesNextEp } = React.useMemo(() => {
-    if (!lastOpenedArticleId) return { continueArticle: null, currentSeriesNextEp: null };
-    const lastOpened = articles.find(a => a.id.toString() === lastOpenedArticleId && a.levels && a.levels[globalLevel]);
-    if (!lastOpened) return { continueArticle: null, currentSeriesNextEp: null };
-
-    const state = typeof window !== "undefined" ? loadUserState() : null;
-    const done = state?.completedArticles || [];
-    const isCompleted = done.includes(lastOpened.id.toString());
-    const progress = state?.articleProgress?.[`${lastOpened.id}::${globalLevel}`] || 0;
-
-    if (!isCompleted && progress > 0.05) {
-      return { continueArticle: lastOpened, currentSeriesNextEp: null };
-    } else if (isCompleted && lastOpened.seriesId) {
-      const sInfo = getSeriesInfo(lastOpened, globalLevel);
-      return { continueArticle: null, currentSeriesNextEp: sInfo ? sInfo.nextEp : null };
+    let nextEp: Article | null = null;
+    if (lastOpenedArticleId) {
+      const last = articles.find(a => String(a.id) === String(lastOpenedArticleId));
+      if (last && completedArticleIds.includes(String(last.id))) {
+         const info = getSeriesInfo(last, globalLevel);
+         if (info?.nextEp) nextEp = info.nextEp;
+      }
     }
-    return { continueArticle: null, currentSeriesNextEp: null };
-  }, [articles, lastOpenedArticleId, globalLevel, activeView, getSeriesInfo]);
+    const contMatch = selectContinueArticle(articles, globalLevel, completedArticleIds, articleProgressMap, lastOpenedArticleId || "");
+    return { continueArticle: contMatch?.article || null, currentSeriesNextEp: nextEp };
+  }, [articles, globalLevel, completedArticleIds, articleProgressMap, lastOpenedArticleId, getSeriesInfo]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -647,19 +942,12 @@ export default function FuragoApp({
     // Load centralized user state
     try {
       const state = loadUserState();
-      // Intentional: user state lives in localStorage and must be hydrated after mount to avoid SSR mismatch.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setGlobalLevel(state.level);
-      setLastCompletedDate(state.dailyMissionCompletedDate);
-      setLastVocabReviewDate(state.vocabReviewXPDate);
-      setLastOpenedArticleId(state.lastOpenedArticleId);
-      setCurrentStreak(state.currentStreak);
-      setLongestStreak(state.longestStreak);
-      setLastStreakDate(state.lastStreakDate);
-      setTotalXP(state.xp);
-      setWordLists(state.wordLists);
-      setSavedWords(state.savedVocabulary);
-      setLearnedWords(state.learnedVocabulary);
+      userStateRef.current = state;
+      setReactUserState(state);
+      
+      const wordsDue = (state.learnedVocabulary || []).filter(w => w.dueAt <= Date.now()).length;
+      checkAndTrackSessionStart(state.currentStreak || 0, wordsDue);
+
       if (localStorage.getItem("furago_lead_subscribed") === "1") {
         setShowLeadBar(false);
       } else {
@@ -679,29 +967,41 @@ export default function FuragoApp({
     setSelectedCategories(catArray);
 
     // Fetch latest articles from GitHub in case new ones were published
-    fetch(DATA_URL)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && Array.isArray(data.articles)) {
-          const valid = data.articles.filter(
-            (a: Article) => a.levels && Object.keys(a.levels).length > 0
-          );
-          valid.sort((a: Article, b: Article) => {
-            const dA = a.date ? new Date(a.date).getTime() : 0;
-            const dB = b.date ? new Date(b.date).getTime() : 0;
-            return dB - dA;
-          });
-          setArticles(valid);
-          const freshCats = new Set<string>();
-          valid.forEach((a: Article) => {
-            if (a.category) freshCats.add((typeof a.category === "string" ? a.category : (a.category?.ja || "")).trim());
-          });
-          const freshArr = Array.from(freshCats);
-          setAllCategories(freshArr);
-          setSelectedCategories((prev) => (prev.length === 0 ? freshArr : prev));
-        }
-      })
-      .catch(() => {});
+    const fetchCatalog = () => {
+      if (!articles || articles.length === 0) setCatalogStatus("loading");
+      fetch(DATA_URL)
+        .then((res) => {
+          if (!res.ok) throw new Error("Fetch failed");
+          return res.json();
+        })
+        .then((data) => {
+          if (data && Array.isArray(data.articles)) {
+            const valid = data.articles.filter(
+              (a: Article) => a.levels && Object.keys(a.levels).length > 0
+            );
+            valid.sort((a: Article, b: Article) => {
+              const dA = a.date ? new Date(a.date).getTime() : 0;
+              const dB = b.date ? new Date(b.date).getTime() : 0;
+              return dB - dA;
+            });
+            setArticles(valid);
+            const freshCats = new Set<string>();
+            valid.forEach((a: Article) => {
+              if (a.category) freshCats.add((typeof a.category === "string" ? a.category : (a.category?.ja || "")).trim());
+            });
+            const freshArr = Array.from(freshCats);
+            setAllCategories(freshArr);
+            setSelectedCategories((prev) => (prev.length === 0 ? freshArr : prev));
+            setCatalogStatus("success");
+          } else {
+            throw new Error("Invalid format");
+          }
+        })
+        .catch(() => {
+          setCatalogStatus(prev => prev === "success" || (articles && articles.length > 0) ? "offline" : "error");
+        });
+    };
+    fetchCatalog();
   }, [initialArticles]);
 
   // 2. Initialize French TTS Voices
@@ -870,7 +1170,9 @@ export default function FuragoApp({
       }
     };
 
-    utterance.onerror = () => {
+    utterance.onerror = (e) => {
+      if (e.error === "canceled") return;
+
       isPlayingRef.current = false;
       isPausedRef.current = false;
       setIsPlaying(false);
@@ -885,6 +1187,8 @@ export default function FuragoApp({
     if (!currentArticle) return;
     const levelData = currentArticle.levels[globalLevel];
     if (!levelData) return;
+
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
 
     if (isPlaying && !isPaused) {
       // Pause
@@ -915,6 +1219,8 @@ export default function FuragoApp({
     if (!currentArticle) return;
     const levelData = currentArticle.levels[globalLevel];
     if (!levelData) return;
+
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
 
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -970,7 +1276,7 @@ export default function FuragoApp({
   };
 
   // Open an article
-  const openArticle = (article: Article) => {
+  const openArticle = (article: Article, skipHistory = false, source?: "home_continue" | "home_mission" | "catalog" | "recommendation") => {
     if (quizTimerRef.current) {
       clearTimeout(quizTimerRef.current);
       quizTimerRef.current = null;
@@ -978,8 +1284,13 @@ export default function FuragoApp({
     stopAudio();
     setDictOpen(false);
     setCurrentArticle(article);
-    setLastOpenedArticleId(article.id.toString());
-    updateUserState({ lastOpenedArticleId: article.id.toString() });
+    
+    mutateUserState({ lastOpenedArticleId: article.id.toString() });
+    
+    if (source) {
+      trackEvent("article_started", { article_id: String(article.id), source });
+    }
+    
     setQuizIndex(0);
     setQuizScore(0);
     setNoQuizCompleted(false);
@@ -989,12 +1300,83 @@ export default function FuragoApp({
     if (levelData) {
       buildQueueForText((levelData.paragraphs || levelData.segments || []));
     }
-    if (dailyArticle && article.id === dailyArticle.id) {
-    // Removed early daily mission completion
+    
+    if (skipHistory) {
+      setActiveView("reading");
+    } else {
+      navigateTo("reading", { id: String(article.id), level: globalLevel });
     }
-    setActiveView("reading");
-    // handled by reading progress effect
   };
+
+  // Initialization and PopState
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const query = new URLSearchParams(window.location.search);
+    const urlView = query.get("view") as typeof activeView | null;
+    
+    if (!urlView || !["home", "reading", "words", "vocab_review"].includes(urlView)) {
+      navigateTo("home", undefined, true);
+    } else {
+      const state: Record<string, string | number | boolean> = { furago: true, view: urlView, historyIdx: window.history.state?.historyIdx || 0 };
+      if (urlView === "reading") {
+        const id = query.get("id");
+        const level = query.get("level");
+        if (id) Object.assign(state, { id, level });
+      } else if (urlView === "vocab_review") {
+        const returnTo = query.get("returnTo");
+        if (returnTo) Object.assign(state, { returnTo });
+      }
+      window.history.replaceState(state, "", window.location.href);
+      setActiveView(urlView);
+    }
+
+    const handlePopState = (e: PopStateEvent) => {
+      const state = e.state;
+      if (!state || !state.furago) {
+        const query = new URLSearchParams(window.location.search);
+        const urlView = query.get("view") as typeof activeView | null;
+        
+        if (urlView && ["home", "reading", "words", "vocab_review"].includes(urlView)) {
+          if (urlView === "vocab_review") {
+            const returnTo = query.get("returnTo");
+            if (returnTo) setVocabReviewReturnTo(returnTo as "home" | "words" | "reading");
+          }
+          setActiveView(urlView);
+        } else {
+          setActiveView("home");
+        }
+        return;
+      }
+      
+      const { view, returnTo } = state;
+      if (view === "vocab_review" && returnTo) {
+        setVocabReviewReturnTo(returnTo);
+      }
+      setActiveView(view);
+    };
+    
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [navigateTo]);
+
+  // Sync Reading View on popstate or direct URL load
+  useEffect(() => {
+    if (activeView !== "reading" || articles.length === 0) return;
+    const query = new URLSearchParams(window.location.search);
+    const id = query.get("id");
+    
+    if (currentArticle && String(currentArticle.id) === id) return;
+    
+    if (id) {
+      const art = articles.find(a => String(a.id) === id);
+      if (art) {
+        openArticle(art, true);
+      } else {
+        navigateTo("home", undefined, true);
+      }
+    }
+  }, [activeView, articles, currentArticle, navigateTo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Safety cleanup for quiz timer
   useEffect(() => {
@@ -1067,6 +1449,8 @@ export default function FuragoApp({
     e.stopPropagation();
     if (!word.trim()) return;
 
+    dictTriggerRef.current = document.activeElement as HTMLElement;
+
     const reqId = ++dictRequestIdRef.current;
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -1083,17 +1467,12 @@ export default function FuragoApp({
     }
   };
 
-  // Close Dictionary Popup when clicking outside
+  // Manage Dictionary Focus Restoration
   useEffect(() => {
-    const handleDocClick = (e: MouseEvent) => {
-      if (!dictOpen) return;
-      const target = e.target as HTMLElement;
-      if (popupRef.current && popupRef.current.contains(target)) return;
-      if (target.closest(".tap-word")) return;
-      setDictOpen(false);
-    };
-    document.addEventListener("mousedown", handleDocClick);
-    return () => document.removeEventListener("mousedown", handleDocClick);
+    if (!dictOpen && dictTriggerRef.current) {
+      dictTriggerRef.current.focus();
+      dictTriggerRef.current = null;
+    }
   }, [dictOpen]);
 
   // Pronounce single word
@@ -1138,8 +1517,8 @@ export default function FuragoApp({
     };
 
     const updated = [...savedWords, newWord];
-    setSavedWords(updated);
-    updateUserState({ savedVocabulary: updated });
+    
+    mutateUserState({ savedVocabulary: updated });
     showToast(t.toasts.saved);
   };
 
@@ -1152,8 +1531,8 @@ export default function FuragoApp({
       name: newListName.trim(),
     };
     const updated = [...wordLists, newList];
-    setWordLists(updated);
-    updateUserState({ wordLists: updated });
+    
+    mutateUserState({ wordLists: updated });
     setNewListName("");
     setNewListModalOpen(false);
     showToast(t.toasts.listCreated);
@@ -1164,8 +1543,8 @@ export default function FuragoApp({
     const updated = savedWords.filter(
       (w) => !(w.fr === wordFr && w.listId === listId)
     );
-    setSavedWords(updated);
-    updateUserState({ savedVocabulary: updated });
+    
+    mutateUserState({ savedVocabulary: updated });
     showToast(t.toasts.deleted);
   };
 
@@ -1244,6 +1623,7 @@ export default function FuragoApp({
   // Clic sur "登録" dans la barre du haut -> Ouvre la modale de profil à l'étape 1
   const handleOpenLeadModal = (e: React.FormEvent) => {
     e.preventDefault();
+    leadTriggerRef.current = document.activeElement as HTMLElement;
     setLeadError(null);
     setLeadSubmitting(false);
     setLeadCheckingEmail(false);
@@ -1365,6 +1745,118 @@ export default function FuragoApp({
     return true;
   });
 
+  const getLevelProgress = (xp: number, currentLevel: number) => {
+    const xpInCurrentLevel = xp % 100;
+    return {
+      xpIntoLevel: xpInCurrentLevel,
+      xpToNextLevel: 100 - xpInCurrentLevel,
+      nextLevel: currentLevel + 1,
+      ratio: xpInCurrentLevel / 100
+    };
+  };
+
+  const getArticleTitle = (a: Article): string => {
+    const title = a.levels[globalLevel]?.title;
+    return (typeof title === "string" ? title : title?.fr) || a.originalTitle || "";
+  };
+  const getCategoryLabel = (a: Article): string =>
+    typeof a.category === "string" ? a.category : (a.category?.[appLang] || a.category?.ja || "");
+  const getCategoryKey = (a: Article): string =>
+    (typeof a.category === "string" ? a.category : a.category?.ja || "").trim();
+
+  const levelProgress = getLevelProgress(totalXP, furagoLevel);
+  const streakStatus = getStreakStatus(currentStreak, lastStreakDate, todayStr);
+  const dueReviewCount = getWordsDueForReview(learnedWords, nowMs).length;
+  const nextReviewOffset = dueReviewCount === 0 ? getNextReviewDayOffset(learnedWords, nowMs) : null;
+  const continueTarget: Article | null = continueArticle ?? currentSeriesNextEp;
+  
+  let continueRatio = 0;
+  if (continueTarget && continueTarget === continueArticle) {
+     continueRatio = articleProgressMap[`${continueTarget.id}::${globalLevel}`] || 0;
+  }
+  const continuePercent = Math.round(continueRatio * 100);
+  
+  const missionIsContinue = !!dailyArticle && !!continueTarget && String(dailyArticle.id) === String(continueTarget.id);
+  const primaryHomeAction: "continue" | "mission" | "review" | "none" = continueTarget
+    ? "continue"
+    : dailyArticle && !isMissionCompletedToday
+      ? "mission"
+      : dueReviewCount > 0
+        ? "review"
+        : "none";
+  const recommendedArticles = selectRecommendedArticles(
+    filteredArticles,
+    completedArticleIds,
+    [continueTarget?.id, dailyArticle?.id].filter((id): id is string | number => id !== undefined && id !== null),
+    getCategoryKey,
+    3
+  );
+
+  const getNextArticleFor = useCallback((article: Article | null): Article | null => {
+    if (!article) return null;
+    const validArticles = filteredArticles;
+    if (validArticles.length <= 1) return null;
+
+    const currentIndex = validArticles.findIndex(a => a.id === article.id);
+    if (currentIndex === -1) return null;
+
+    const completed = completedArticleIds || [];
+
+    // Look forward
+    for (let i = currentIndex + 1; i < validArticles.length; i++) {
+      if (!completed.includes(String(validArticles[i].id))) return validArticles[i];
+    }
+    // Look from start
+    for (let i = 0; i < currentIndex; i++) {
+      if (!completed.includes(String(validArticles[i].id))) return validArticles[i];
+    }
+    
+    // Fallback: Just next article in the filtered list
+    return validArticles[(currentIndex + 1) % validArticles.length];
+  }, [filteredArticles, completedArticleIds]);
+
+  const homeCard: React.CSSProperties = { background: "var(--surface)", borderRadius: "18px", border: "1px solid var(--border)", padding: "14px", marginBottom: "4px", boxSizing: "border-box", maxWidth: "100%" };
+  const homeSectionLabel: React.CSSProperties = { fontSize: "0.78rem", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", margin: "20px 0 8px" };
+  const homeMeta: React.CSSProperties = { margin: "4px 0 0", color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 600, overflowWrap: "anywhere" };
+  const homeTitle: React.CSSProperties = { margin: 0, fontSize: "1.02rem", fontWeight: 700, lineHeight: 1.3, color: "var(--text-main)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" };
+  const homeCompactLine: React.CSSProperties = { margin: 0, padding: "12px 14px", borderRadius: "14px", background: "var(--surface)", border: "1px solid var(--border)", fontSize: "0.9rem", fontWeight: 600, color: "var(--text-muted)", overflowWrap: "anywhere" };
+  const homeCtaPrimary: React.CSSProperties = { width: "100%", minHeight: "48px", padding: "12px 16px", borderRadius: "14px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.02rem", fontWeight: 800, cursor: "pointer" };
+  const homeCtaSecondary: React.CSSProperties = { ...homeCtaPrimary, background: "var(--primary-light)", color: "var(--primary)" };
+  const homeCta = (isPrimary: boolean) => (isPrimary ? homeCtaPrimary : homeCtaSecondary);
+  const homeThumb = (size: number): React.CSSProperties => ({ width: size, height: size, borderRadius: "12px", overflow: "hidden", flexShrink: 0, background: "var(--bg)" });
+
+  // --- ANALYTICS: HOME VIEWED ---
+  useEffect(() => {
+    if (activeView === "home") {
+      const key = `home_viewed_${dueReviewCount}_${dailyArticle?.id || 'none'}_${continueTarget?.id || 'none'}`;
+      if (!analyticsFiredRef.current[key]) {
+        trackEvent("home_viewed", {
+          srs_due_count: dueReviewCount,
+          has_daily_mission: !!dailyArticle,
+          has_continue_article: !!continueTarget
+        });
+        analyticsFiredRef.current[key] = true;
+      }
+    }
+  }, [activeView, dueReviewCount, dailyArticle, continueTarget]);
+
+  // --- ANALYTICS: SRS SESSION COMPLETED ---
+  useEffect(() => {
+    if (activeView === "vocab_review" && vocabReviewWords.length > 0 && vocabReviewIndex === vocabReviewWords.length) {
+      const key = `srs_completed_${vocabReviewWords.length}_${vocabReviewCorrectCount}_${Date.now()}`;
+      if (!analyticsFiredRef.current['srs_completed_fired']) {
+        trackEvent("srs_session_completed", { 
+          reviewed_count: vocabReviewWords.length, 
+          correct_count: vocabReviewCorrectCount 
+        });
+        analyticsFiredRef.current['srs_completed_fired'] = true;
+      }
+    } else if (activeView !== "vocab_review" || vocabReviewIndex === 0) {
+      // Reset when starting a new review or leaving
+      analyticsFiredRef.current['srs_completed_fired'] = false;
+    }
+  }, [activeView, vocabReviewIndex, vocabReviewWords.length, vocabReviewCorrectCount]);
+
   // Render interactive French paragraph with clickable words and TTS highlight
   const renderInteractiveContent = (paragraphs: Paragraph[]) => {
     let globalOffset = 0;
@@ -1403,7 +1895,8 @@ export default function FuragoApp({
 
         if (isWord) {
           elements.push(
-            <span
+            <button
+              type="button"
               key={startIdx}
               onClick={(e) => handleWordClick(e, token, text)}
               style={{
@@ -1420,10 +1913,10 @@ export default function FuragoApp({
                     : "transparent",
                 borderRadius: "4px",
               }}
-              className="hover-word"
+              className="hover-word reset-button interactive-word"
             >
               {token}
-            </span>
+            </button>
           );
         } else {
           elements.push(
@@ -1465,35 +1958,18 @@ export default function FuragoApp({
   const progressPercent =
     ttsQueue.length > 0 ? ((queueIndex + 1) / ttsQueue.length) * 100 : 0;
 
-  const quizNextEp = (activeView === "reading" && currentArticle?.seriesId) ? getSeriesInfo(currentArticle, globalLevel)?.nextEp : null;
+  const currentSeriesInfo = currentArticle ? getSeriesInfo(currentArticle, globalLevel) : null;
+  const quizNextEp = currentArticle?.seriesId ? currentSeriesInfo?.nextEp : null;
+  const nextRewardEp = currentArticle?.seriesId ? currentSeriesInfo?.nextEp : null;
+  const nextRewardArticle = getNextArticleFor(currentArticle);
+  const dueRemaining = vocabReviewSource === "learned"
+    ? getWordsDueForReview(learnedWords, nowMs).length
+    : 0;
 
   const renderCompletionScreen = () => {
     const hasQuiz = currentLevelData?.quiz && currentLevelData.quiz.length > 0;
-    const sInfo = getSeriesInfo(currentArticle, globalLevel);
-
-    const getNextArticle = () => {
-      if (!currentArticle) return null;
-      const validArticles = filteredArticles;
-      if (validArticles.length <= 1) return null;
-
-      const currentIndex = validArticles.findIndex(a => a.id === currentArticle.id);
-      if (currentIndex === -1) return null;
-
-      const state = loadUserState();
-      const completed = state.completedArticles || [];
-
-      // Look forward
-      for (let i = currentIndex + 1; i < validArticles.length; i++) {
-        if (!completed.includes(String(validArticles[i].id))) return validArticles[i];
-      }
-      // Look from start
-      for (let i = 0; i < currentIndex; i++) {
-        if (!completed.includes(String(validArticles[i].id))) return validArticles[i];
-      }
-      
-      // Fallback: Just next article in the filtered list
-      return validArticles[(currentIndex + 1) % validArticles.length];
-    };
+    const sInfo = currentSeriesInfo;
+    const nextArticle = getNextArticleFor(currentArticle);
 
     return (
       <div className="quiz-card fade-in" style={{ textAlign: "center", padding: "32px 24px" }}>
@@ -1519,11 +1995,23 @@ export default function FuragoApp({
             <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "#ff9500" }}>🔥 {currentStreak} {appLang === 'ja' ? '日' : 'days'}</span>
           </div>
           {sessionReward !== null && sessionReward.vocab > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
               <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "新出単語" : "New Words"}</span>
-              <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>📚 {sessionReward.vocab} items</span>
+              <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>📚 {sessionReward.vocab} {appLang === 'ja' ? '件' : 'items'}</span>
             </div>
           )}
+          {(() => {
+             const stats = getReviewStats(learnedWords, nowMs);
+             if (stats.dueToday > 0) {
+               return (
+                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
+                   <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "復習待ち" : "Due for Review"}</span>
+                   <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "var(--primary)" }}>🔄 {stats.dueToday} {appLang === 'ja' ? '件' : 'items'}</span>
+                 </div>
+               );
+             }
+             return null;
+          })()}
         </div>
 
         {currentArticle?.seriesId && sInfo && (
@@ -1537,48 +2025,62 @@ export default function FuragoApp({
           </div>
         )}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {currentArticle?.seriesId ? (
-            quizNextEp ? (
-              <button
-                onClick={() => openArticle(quizNextEp)}
-                style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-              >
-                {appLang === "ja" ? "次のエピソード" : "Next Episode"}
-              </button>
-            ) : (
-              <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center", display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <span style={{ fontSize: '1.1rem' }}>{appLang === "ja" ? "🏆 シリーズ完了" : "🏆 Series Completed"}</span>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{appLang === "ja" ? "このシリーズのすべてのエピソードを読み終えました。" : "You have finished all episodes in this series."}</span>
-              </div>
-            )
-          ) : (
-            <button
-              onClick={() => {
-                const nextArticle = getNextArticle();
-                if (nextArticle) {
-                  openArticle(nextArticle);
-                } else {
-                  setActiveView("home");
-                  window.scrollTo(0,0);
-                }
-              }}
-              style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-            >
-              {appLang === "ja" ? "次の記事" : "Next Article"}
-            </button>
-          )}
+        {(() => {
+          const stats = getReviewStats(learnedWords, nowMs);
+          const hasVocabToReview = (sessionReward !== null && sessionReward.vocab > 0) || stats.dueToday > 0;
           
-          <button
-            onClick={() => {
-              setActiveView("home");
-              window.scrollTo(0,0);
-            }}
-            style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--bg)", color: "var(--text-main)", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-          >
-            {appLang === "ja" ? "ホームへ戻る" : "Back to Home"}
-          </button>
-        </div>
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {hasVocabToReview && (
+                <button
+                  type="button"
+                  onClick={() => startVocabReview("learned", "reading")}
+                  style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+                >
+                  🔄 {appLang === "ja" ? "単語を復習する" : "Review Vocabulary"}
+                </button>
+              )}
+
+              {currentArticle?.seriesId ? (
+                quizNextEp ? (
+                  <button
+                    onClick={() => openArticle(quizNextEp)}
+                    style={{ width: "100%", padding: "14px", borderRadius: "16px", border: hasVocabToReview ? "2px solid var(--primary)" : "none", background: hasVocabToReview ? "var(--bg)" : "var(--primary)", color: hasVocabToReview ? "var(--primary)" : "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+                  >
+                    {appLang === "ja" ? "次のエピソード" : "Next Episode"}
+                  </button>
+                ) : (
+                  <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center", display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <span style={{ fontSize: '1.1rem' }}>{appLang === "ja" ? "🏆 シリーズ完了" : "🏆 Series Completed"}</span>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{appLang === "ja" ? "このシリーズのすべてのエピソードを読み終えました。" : "You have finished all episodes in this series."}</span>
+                  </div>
+                )
+              ) : (
+                <button
+                  onClick={() => {
+                    if (nextArticle) {
+                      openArticle(nextArticle);
+                    } else {
+                      navigateTo("home");
+                    }
+                  }}
+                  style={{ width: "100%", padding: "14px", borderRadius: "16px", border: hasVocabToReview ? "2px solid var(--primary)" : "none", background: hasVocabToReview ? "var(--bg)" : "var(--primary)", color: hasVocabToReview ? "var(--primary)" : "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+                >
+                  {appLang === "ja" ? "次の記事" : "Next Article"}
+                </button>
+              )}
+              
+              <button
+                onClick={() => {
+                  handleBack("home");
+                }}
+                style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--bg)", color: "var(--text-main)", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
+              >
+                {appLang === "ja" ? "ホームへ戻る" : "Back to Home"}
+              </button>
+            </div>
+          );
+        })()}
       </div>
     );
   };
@@ -1615,6 +2117,7 @@ return (
               value={leadEmail}
               onChange={(e) => setLeadEmail(e.target.value)}
               placeholder="e.g. taro@furago.com"
+              aria-label="Adresse email"
               className="lead-bar-input"
               style={{ padding: '6px 12px', borderRadius: '16px', border: 'none', outline: 'none', fontSize: '0.85rem' }}
             />
@@ -1650,7 +2153,7 @@ return (
               onClick={() => {
                 stopAudio();
                 setDictOpen(false);
-                setActiveView("home");
+                handleBack("home");
               }}
               aria-label="Back"
             >
@@ -1686,7 +2189,10 @@ return (
           {activeView === "reading" && (
             <button
                 className="header-level-btn"
-                onClick={() => setFilterModalType("level")}
+                onClick={(e) => {
+                  filterTriggerRef.current = e.currentTarget;
+                  setFilterModalType("level");
+                }}
             >
                 <span className="level-text">{t.levels[globalLevel as keyof typeof t.levels] || globalLevel}</span>
                 <span className="level-arrow">▾</span>
@@ -1716,13 +2222,19 @@ return (
           <div className="filters-bar">
             <button
               className="filter-btn"
-              onClick={() => setFilterModalType("level")}
+              onClick={(e) => {
+                filterTriggerRef.current = e.currentTarget;
+                setFilterModalType("level");
+              }}
             >
               {t.nav.level} : {t.levels[globalLevel as keyof typeof t.levels] || globalLevel}
             </button>
             <button
               className="filter-btn"
-              onClick={() => setFilterModalType("category")}
+              onClick={(e) => {
+                filterTriggerRef.current = e.currentTarget;
+                setFilterModalType("category");
+              }}
             >
               {selectedCategories.length === allCategories.length ||
               selectedCategories.length === 0
@@ -1731,155 +2243,248 @@ return (
             </button>
           </div>
 
-          <div style={{ padding: '20px 20px 0' }}>
-            <h1 style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '4px' }}>
-              {appLang === 'ja' ? '今日やること' : "Today's Tasks"}
-            </h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', fontWeight: 600, marginBottom: '24px' }}>
-              What should I do today?
-            </p>
-
-            {/* Priority 1: Continue reading */}
-            {continueArticle && (
-              <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--primary)', fontWeight: 800 }}>
-                    {appLang === 'ja' ? '続きを読む' : 'Continue Reading'}
-                  </h2>
+          <div style={{ padding: '16px 16px 0', maxWidth: '100%', boxSizing: 'border-box' }}>
+            {/* A. PROGRESSION — where am I? */}
+            <section aria-label={appLang === 'ja' ? '進捗' : 'Progress'} style={{ ...homeCard, padding: '14px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }}>
+                  <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                    {appLang === 'ja' ? `レベル ${furagoLevel}` : `Level ${furagoLevel}`}
+                  </span>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-muted)' }}>{totalXP} XP</span>
                 </div>
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                  {continueArticle.imageUrl && (
-                    <div style={{ width: '80px', height: '80px', borderRadius: '16px', overflow: 'hidden', flexShrink: 0 }}>
-                      <img src={formatDriveUrl(continueArticle.imageUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <span style={{ fontSize: '0.95rem', fontWeight: 800, color: streakStatus.display > 0 ? '#ff9500' : 'var(--text-muted)' }}>
+                  🔥 {streakStatus.display} {appLang === 'ja' ? '日' : (streakStatus.display === 1 ? 'day' : 'days')}
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                aria-label={appLang === 'ja' ? '次のレベルまで' : 'Progress to next level'}
+                aria-valuemin={0}
+                aria-valuemax={levelProgress.xpIntoLevel + levelProgress.xpToNextLevel}
+                aria-valuenow={levelProgress.xpIntoLevel}
+                style={{ height: '8px', borderRadius: '8px', background: 'var(--bg)', overflow: 'hidden', margin: '10px 0 8px' }}
+              >
+                <div style={{ width: `${Math.round(levelProgress.ratio * 100)}%`, height: '100%', background: 'var(--primary)', borderRadius: '8px', transition: 'width 0.3s' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px 12px', flexWrap: 'wrap', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                <span>
+                  {appLang === 'ja'
+                    ? `レベル${levelProgress.nextLevel}まであと ${levelProgress.xpToNextLevel} XP`
+                    : `${levelProgress.xpToNextLevel} XP to level ${levelProgress.nextLevel}`}
+                </span>
+                <span>
+                  {streakStatus.state === 'done_today'
+                    ? (appLang === 'ja' ? '今日のストリーク達成 ✓' : 'Streak kept today ✓')
+                    : streakStatus.state === 'at_risk'
+                      ? (appLang === 'ja' ? '今日1本読んでストリークを守ろう' : 'Read today to keep your streak')
+                      : (appLang === 'ja' ? '今日からストリークを始めよう' : 'Start a streak today')}
+                </span>
+              </div>
+            </section>
+
+            {/* B. CONTINUER — real in-progress article (or next episode of a finished series) */}
+            {continueTarget && (
+              <section aria-labelledby="home-continue">
+                <h2 id="home-continue" style={homeSectionLabel}>
+                  {continueArticle
+                    ? (appLang === 'ja' ? '続きから' : 'Continue')
+                    : (appLang === 'ja' ? 'シリーズの続き' : 'Continue the series')}
+                </h2>
+                <div style={homeCard}>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', minWidth: 0 }}>
+                    {continueTarget.imageUrl && (
+                      <div style={homeThumb(64)}>
+                        <img src={formatDriveUrl(continueTarget.imageUrl)} alt="" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <h3 lang="fr" style={homeTitle}>{getArticleTitle(continueTarget)}</h3>
+                      <p style={homeMeta}>
+                        {[
+                          t.levels[globalLevel as keyof typeof t.levels],
+                          getCategoryLabel(continueTarget),
+                          !continueArticle && continueTarget.seriesOrder ? `Episode ${continueTarget.seriesOrder}` : '',
+                        ].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                  </div>
+                  {continueArticle && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px' }}>
+                      <div
+                        role="progressbar"
+                        aria-label={appLang === 'ja' ? '読了率' : 'Reading progress'}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={continuePercent}
+                        style={{ flex: 1, height: '6px', borderRadius: '6px', background: 'var(--bg)', overflow: 'hidden' }}
+                      >
+                        <div style={{ width: `${continuePercent}%`, height: '100%', background: 'var(--primary)' }} />
+                      </div>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--primary)', minWidth: '4ch', textAlign: 'right' }}>
+                        {continuePercent}%
+                      </span>
                     </div>
                   )}
-                  <div style={{ flex: 1 }}>
-                    <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
-                      {typeof continueArticle.levels[globalLevel]?.title === 'string' 
-                         ? continueArticle.levels[globalLevel]?.title 
-                         : (continueArticle.levels[globalLevel]?.title as TranslatableText | undefined)?.fr || continueArticle.originalTitle}
-                    </h3>
-                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
-                      {t.levels[globalLevel as keyof typeof t.levels]}
+                  {missionIsContinue && !isMissionCompletedToday && (
+                    <p style={{ ...homeMeta, color: 'var(--primary)', fontWeight: 700, marginTop: '10px' }}>
+                      {appLang === 'ja' ? '🎯 今日のミッション対象の記事です' : "🎯 This is today's mission"}
                     </p>
-                  </div>
+                  )}
+                  <button onClick={() => {
+                    trackEvent("home_cta_clicked", { cta_type: "continue", position: 1 });
+                    openArticle(continueTarget, false, "home_continue");
+                  }} style={{ ...homeCta(primaryHomeAction === 'continue'), marginTop: '12px' }}>
+                    {continueArticle
+                      ? (appLang === 'ja' ? '続きを読む' : 'Continue reading')
+                      : (appLang === 'ja' ? '次のエピソードへ' : 'Next episode')}
+                  </button>
                 </div>
-                <button 
-                  onClick={() => openArticle(continueArticle)}
-                  style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-                >
-                  {appLang === 'ja' ? '続きを読む' : 'Continue Reading'}
-                </button>
-              </div>
+              </section>
             )}
 
-            {/* Priority 2: Today's mission */}
-            {dailyArticle && (
-              <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>{appLang === 'ja' ? '今日のミッション' : "Today's Mission"}</h2>
-                  {isMissionCompletedToday && (
-                    <span style={{ background: '#4cd964', color: 'white', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>{appLang === 'ja' ? 'クリア！' : 'Cleared!'}</span>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                  {dailyArticle.imageUrl && (
-                    <div style={{ width: '80px', height: '80px', borderRadius: '16px', overflow: 'hidden', flexShrink: 0 }}>
-                      <img src={formatDriveUrl(dailyArticle.imageUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </div>
-                  )}
-                  <div style={{ flex: 1 }}>
-                    <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
-                      {typeof dailyArticle.levels[globalLevel]?.title === 'string' 
-                         ? dailyArticle.levels[globalLevel]?.title 
-                         : (dailyArticle.levels[globalLevel]?.title as TranslatableText | undefined)?.fr || dailyArticle.originalTitle}
-                    </h3>
-                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
-                      {t.levels[globalLevel as keyof typeof t.levels]} · 5 min
+            {/* C. À RÉVISER — count comes from getWordsDueForReview (real SRS) */}
+            <section aria-labelledby="home-review">
+              <h2 id="home-review" style={homeSectionLabel}>{appLang === 'ja' ? '復習' : 'To review'}</h2>
+              {dueReviewCount > 0 ? (
+                <div style={{ ...homeCard, display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 150px', minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                      {appLang === 'ja' ? `${dueReviewCount}語が復習待ち` : `${dueReviewCount} ${dueReviewCount === 1 ? 'word' : 'words'} due`}
                     </p>
+                    <p style={homeMeta}>{appLang === 'ja' ? '忘れる前に確認しよう' : 'Review them before you forget'}</p>
                   </div>
-                </div>
-                {!isMissionCompletedToday ? (
-                  <button 
-                    onClick={() => openArticle(dailyArticle)}
-                    style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                  <button
+                    onClick={() => {
+                      trackEvent("home_cta_clicked", { cta_type: "srs", position: 2 });
+                      startVocabReview("learned", "home");
+                    }}
+                    style={{ ...homeCta(primaryHomeAction === 'review'), width: 'auto', flex: '0 0 auto', padding: '12px 22px' }}
                   >
-                    {t.reading.read}
+                    {appLang === 'ja' ? '復習する' : 'Review'}
                   </button>
+                </div>
+              ) : (
+                <p style={homeCompactLine}>
+                  {learnedWords.length === 0
+                    ? (appLang === 'ja' ? '記事を読み終えると、ここに復習する単語が追加されます' : 'Finish an article to add words to review')
+                    : nextReviewOffset === 0
+                      ? (appLang === 'ja' ? '✅ 今は復習なし · 次は今日中' : '✅ Nothing due now · next review later today')
+                      : nextReviewOffset === 1
+                        ? (appLang === 'ja' ? '✅ 復習完了 · 次は明日' : '✅ All caught up · next review tomorrow')
+                        : nextReviewOffset !== null
+                          ? (appLang === 'ja' ? `✅ 復習完了 · 次は${nextReviewOffset}日後` : `✅ All caught up · next review in ${nextReviewOffset} days`)
+                          : (appLang === 'ja' ? '✅ 復習完了' : '✅ All caught up')}
+                </p>
+              )}
+              {savedWords.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    trackEvent("home_cta_clicked", { cta_type: "srs", position: 3 });
+                    startVocabReview("saved", "home");
+                  }}
+                  style={{ background: 'none', border: 'none', padding: '8px 2px', minHeight: '44px', color: 'var(--primary)', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  {appLang === 'ja' ? `保存した単語を練習する（${savedWords.length}）` : `Practice my saved words (${savedWords.length})`}
+                </button>
+              )}
+            </section>
+
+            {/* D. MISSION DU JOUR — existing daily mission (dailyArticle + dailyMissionCompletedDate) */}
+            {dailyArticle && (
+              <section aria-labelledby="home-mission">
+                <h2 id="home-mission" style={homeSectionLabel}>{appLang === 'ja' ? '今日のミッション' : "Today's mission"}</h2>
+                {isMissionCompletedToday ? (
+                  <p style={{ ...homeCompactLine, color: '#2e7d32', background: 'var(--green-light)', borderColor: 'transparent' }}>
+                    {appLang === 'ja' ? '✅ ミッション完了！明日また新しいミッションが届きます' : '✅ Mission complete! A new one arrives tomorrow'}
+                  </p>
+                ) : missionIsContinue ? (
+                  <p style={homeCompactLine}>
+                    {appLang === 'ja' ? '🎯 読みかけの記事を最後まで読もう（上の「続きを読む」）' : '🎯 Finish the article you started (above)'}
+                  </p>
                 ) : (
-                  <div style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', background: 'rgba(76, 217, 100, 0.15)', color: '#2e7d32', fontSize: '1.05rem', fontWeight: 800, textAlign: 'center' }}>
-                    {appLang === 'ja' ? '✅ 今日のミッション完了' : "✅ Today's Mission Completed"}
+                  <div style={homeCard}>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', minWidth: 0 }}>
+                      {dailyArticle.imageUrl && (
+                        <div style={homeThumb(56)}>
+                          <img src={formatDriveUrl(dailyArticle.imageUrl)} alt="" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: '0 0 4px', fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary)' }}>
+                          {appLang === 'ja' ? '🎯 この記事を読み終えよう' : '🎯 Finish this article'}
+                        </p>
+                        <h3 lang="fr" style={homeTitle}>{getArticleTitle(dailyArticle)}</h3>
+                        <p style={homeMeta}>{appLang === 'ja' ? 'ボーナスXP · ストリーク継続' : 'Bonus XP · keeps your streak'}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => {
+                      trackEvent("home_cta_clicked", { cta_type: "mission", position: 2 });
+                      openArticle(dailyArticle, false, "home_mission");
+                    }} style={{ ...homeCta(primaryHomeAction === 'mission'), marginTop: '12px' }}>
+                      {t.reading.read}
+                    </button>
                   </div>
                 )}
-              </div>
+              </section>
             )}
 
-            {/* Priority 4: Vocabulary review */}
-            {savedWords.length > 0 && (
-              <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>{appLang === 'ja' ? '🔤 今日の復習' : "🔤 Today's Review"}</h2>
-                  {isVocabReviewCompletedToday && (
-                    <span style={{ background: 'var(--bg)', color: 'var(--text-muted)', padding: '4px 12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800 }}>
-                      {appLang === 'ja' ? 'クリア！' : 'Cleared!'}
-                    </span>
-                  )}
-                </div>
-                <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>{Math.min(5, savedWords.length)} mots</p>
-                <button 
-                  onClick={() => startVocabReview("saved")}
-                  style={{ width: '100%', padding: '14px', borderRadius: '16px', border: 'none', background: isVocabReviewCompletedToday ? 'var(--bg)' : 'var(--primary)', color: isVocabReviewCompletedToday ? 'var(--text-muted)' : 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-                >
-                  {isVocabReviewCompletedToday ? (appLang === 'ja' ? 'もう一度復習する' : 'Review again') : (appLang === 'ja' ? '復習する' : 'Review')}
-                </button>
-              </div>
+            {/* E. RECOMMANDÉ — not completed, newest first, one per category first */}
+            {recommendedArticles.length > 0 && (
+              <section aria-labelledby="home-reco">
+                <h2 id="home-reco" style={homeSectionLabel}>{appLang === 'ja' ? 'あなたへのおすすめ' : 'Recommended for you'}</h2>
+                <ul style={{ ...homeCard, listStyle: 'none', margin: 0, padding: '2px 12px' }}>
+                  {recommendedArticles.map((a, i) => (
+                    <li key={a.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          trackEvent("home_cta_clicked", { cta_type: "recommendation", position: 3 + i });
+                          openArticle(a, false, "recommendation");
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', minWidth: 0, padding: '10px 0', background: 'none', border: 'none', borderTop: i === 0 ? 'none' : '1px solid var(--border)', cursor: 'pointer', textAlign: 'left', color: 'inherit', font: 'inherit' }}
+                      >
+                        {a.imageUrl ? (
+                          <span style={{ ...homeThumb(52), display: 'block' }}>
+                            <img src={formatDriveUrl(a.imageUrl)} alt="" loading="lazy" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </span>
+                        ) : null}
+                        <span style={{ flex: 1, minWidth: 0, display: 'block' }}>
+                          <span lang="fr" style={{ ...homeTitle, fontSize: '0.97rem' }}>{getArticleTitle(a)}</span>
+                          {getCategoryLabel(a) && <span style={{ ...homeMeta, display: 'block' }}>{getCategoryLabel(a)}</span>}
+                        </span>
+                        <span aria-hidden="true" style={{ color: 'var(--text-muted)', fontSize: '1.3rem', flexShrink: 0 }}>›</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
 
-            {/* Priority 5: Current series */}
-            {currentSeriesNextEp && (
-              <div className="fade-in" style={{ marginBottom: '16px', padding: '20px', background: 'var(--surface)', borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #eaeaea' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.2rem', margin: 0, color: 'var(--text-main)', fontWeight: 800 }}>📚 {currentSeriesNextEp.seriesId?.replace(/_/g, ' ')}</h2>
-                </div>
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                  {currentSeriesNextEp.imageUrl && (
-                    <div style={{ width: '80px', height: '80px', borderRadius: '16px', overflow: 'hidden', flexShrink: 0 }}>
-                      <img src={formatDriveUrl(currentSeriesNextEp.imageUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </div>
-                  )}
-                  <div style={{ flex: 1 }}>
-                    <h3 style={{ margin: '0 0 6px 0', fontSize: '1.15rem', fontWeight: 700, lineHeight: '1.3' }}>
-                      {typeof currentSeriesNextEp.levels[globalLevel]?.title === 'string' 
-                         ? currentSeriesNextEp.levels[globalLevel]?.title 
-                         : (currentSeriesNextEp.levels[globalLevel]?.title as TranslatableText | undefined)?.fr || currentSeriesNextEp.originalTitle}
-                    </h3>
-                    <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>
-                      Episode {currentSeriesNextEp.seriesOrder || '?'}
-                    </p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => openArticle(currentSeriesNextEp)}
-                  style={{ width: '100%', marginTop: '20px', padding: '14px', borderRadius: '16px', border: 'none', background: 'var(--primary)', color: 'white', fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-                >
-                  {appLang === 'ja' ? '次のエピソード' : 'Next Episode'}
-                </button>
-              </div>
-            )}
-
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-main)', marginTop: '32px', marginBottom: '16px' }}>
-              {appLang === 'ja' ? '新着・おすすめ' : 'Latest Articles'}
+            <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)', margin: '28px 0 12px' }}>
+              {appLang === 'ja' ? 'すべての記事' : 'All articles'}
             </h2>
           </div>
 
-          {filteredArticles.length === 0 ? (
-            <p
-              style={{
-                textAlign: "center",
-                padding: "40px 20px",
-                color: "var(--text-muted)",
-              }}
-            >
+          {catalogStatus === "loading" ? (
+            <p style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-muted)" }}>
+              {appLang === "ja" ? "読み込み中..." : "Loading..."}
+            </p>
+          ) : catalogStatus === "error" ? (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <p style={{ color: "var(--text-muted)", marginBottom: "16px" }}>
+                {appLang === "ja" ? "記事を読み込めませんでした。ネットワーク接続を確認してください。" : "Could not load articles. Please check your network connection."}
+              </p>
+              <button 
+                onClick={() => window.location.reload()}
+                style={{ padding: "10px 20px", background: "var(--primary)", color: "white", borderRadius: "10px", border: "none", fontWeight: "bold", cursor: "pointer" }}
+              >
+                {appLang === "ja" ? "再試行" : "Retry"}
+              </button>
+            </div>
+          ) : filteredArticles.length === 0 ? (
+            <p style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-muted)" }}>
               {appLang === "ja" ? "条件に一致する記事は見つかりませんでした。" : "No articles found matching the criteria."}
             </p>
           ) : (
@@ -1893,13 +2498,15 @@ return (
                   : "";
 
                 return (
-                  <li
-                    key={article.id || index}
-                    onClick={() => openArticle(article)}
-                    className={`article-card fade-in ${
-                      index === 0 ? "hero-format" : "list-format"
-                    }`}
-                  >
+                  <li key={article.id || index} style={{ padding: 0, margin: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => openArticle(article, false, "catalog")}
+                      className={`article-card fade-in reset-button ${
+                        index === 0 ? "hero-format" : "list-format"
+                      }`}
+                      style={{ width: "100%", textAlign: "left", display: "flex" }}
+                    >
                     {imgUrl && (
                       <div className="article-image-container">
                         <img
@@ -1954,6 +2561,7 @@ return (
                         )}
                       </p>
                     </div>
+                    </button>
                   </li>
                 );
               })}
@@ -2227,8 +2835,7 @@ return (
               </p>
               <button
                 onClick={() => {
-                  setActiveView(vocabReviewReturnTo);
-                  window.scrollTo(0,0);
+                  handleBack(vocabReviewReturnTo);
                 }}
                 style={{ width: '100%', padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
               >
@@ -2249,6 +2856,8 @@ return (
                   </div>
                   <button
                     onClick={() => {
+                      handleRecordReviewResult(vocabReviewWords[vocabReviewIndex], true);
+                      setVocabReviewCorrectCount(prev => prev + 1);
                       setVocabReviewIndex(idx => idx + 1);
                     }}
                     style={{ padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
@@ -2282,6 +2891,11 @@ return (
                         disabled={vocabReviewSelected !== null}
                         onClick={() => {
                           setVocabReviewSelected(ans);
+                          if (isCorrect) {
+                            setVocabReviewCorrectCount(prev => prev + 1);
+                          }
+                          handleRecordReviewResult(vocabReviewWords[vocabReviewIndex], isCorrect);
+                          
                           setTimeout(() => {
                             setVocabReviewSelected(null);
                             setVocabReviewIndex(idx => idx + 1);
@@ -2309,26 +2923,316 @@ return (
               )}
             </div>
           ) : (
-            <div className="fade-in" style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
-              <div style={{ fontSize: '4rem', marginBottom: '16px' }}>🎉</div>
-              <h1 style={{ fontSize: '1.8rem', marginBottom: '16px', color: 'var(--text-main)' }}>
-                {appLang === "ja" ? "復習完了！" : "Review Completed!"}
-              </h1>
-              <p style={{ fontSize: '1.1rem', marginBottom: '32px', color: 'var(--text-muted)' }}>
-                {appLang === "ja" ? "よくできました！" : "Great job!"}
-              </p>
-              <button
-                onClick={() => {
-                  checkAndAwardVocabReviewXP();
-                  setActiveView(vocabReviewReturnTo);
-                  window.scrollTo(0,0);
-                }}
-                style={{ width: '100%', padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
-              >
-                {appLang === "ja" ? "戻る" : "Back"}
-              </button>
-            </div>
-          )}
+            <div className="fade-in" style={{ textAlign: 'center', padding: '36px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
+                <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>
+                  {dueRemaining === 0 ? "🎉" : "✨"}
+                </div>
+                <h1 style={{ fontSize: '1.75rem', marginBottom: '12px', color: 'var(--text-main)', fontWeight: 800 }}>
+                  {dueRemaining === 0
+                    ? (appLang === "ja" ? "復習完了！" : "Review Completed!")
+                    : (appLang === "ja" ? "セッション完了！" : "Session Completed!")}
+                </h1>
+                <p style={{ fontSize: '1.05rem', marginBottom: '28px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  {dueRemaining === 0
+                    ? (appLang === "ja" ? "🎉 すべての復習が完了しました！" : "🎉 All reviews are up to date!")
+                    : (appLang === "ja"
+                        ? `あと${dueRemaining}語の復習が残っています`
+                        : `You have ${dueRemaining} ${dueRemaining === 1 ? 'word' : 'words'} left to review`)}
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '420px', margin: '0 auto', width: '100%' }}>
+                  {/* PRIMARY CTA */}
+                  {dueRemaining > 0 ? (
+                    <button
+                      onClick={() => {
+                        checkAndAwardVocabReviewXP();
+                        startVocabReview("learned", vocabReviewReturnTo);
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '16px',
+                        borderRadius: '16px',
+                        background: 'var(--primary)',
+                        color: 'white',
+                        fontSize: '1.05rem',
+                        fontWeight: 700,
+                        border: 'none',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+                      }}
+                    >
+                      {appLang === "ja"
+                        ? `🔄 復習を続ける (+${Math.min(5, dueRemaining)})`
+                        : `🔄 Continue review (+${Math.min(5, dueRemaining)})`}
+                    </button>
+                  ) : vocabReviewReturnTo === "reading" ? (
+                    nextRewardEp ? (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          openArticle(nextRewardEp);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '16px',
+                          borderRadius: '16px',
+                          background: 'var(--primary)',
+                          color: 'white',
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+                        }}
+                      >
+                        {appLang === "ja" ? "📖 次のエピソード" : "📖 Next Episode"}
+                      </button>
+                    ) : nextRewardArticle ? (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          openArticle(nextRewardArticle);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '16px',
+                          borderRadius: '16px',
+                          background: 'var(--primary)',
+                          color: 'white',
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+                        }}
+                      >
+                        {appLang === "ja" ? "📖 次の記事" : "📖 Next Article"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          navigateTo("home");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '16px',
+                          borderRadius: '16px',
+                          background: 'var(--primary)',
+                          color: 'white',
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+                        }}
+                      >
+                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
+                      </button>
+                    )
+                  ) : vocabReviewReturnTo === "home" ? (
+                    continueTarget ? (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          trackEvent("home_cta_clicked", { cta_type: "continue", position: 1 });
+                          openArticle(continueTarget, false, "home_continue");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '16px',
+                          borderRadius: '16px',
+                          background: 'var(--primary)',
+                          color: 'white',
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+                        }}
+                      >
+                        {continueArticle
+                          ? (appLang === "ja" ? "📖 続きを読む" : "📖 Continue reading")
+                          : (appLang === "ja" ? "📖 次のエピソードへ" : "📖 Next episode")}
+                      </button>
+                    ) : dailyArticle && !isMissionCompletedToday ? (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          trackEvent("home_cta_clicked", { cta_type: "mission", position: 2 });
+                          openArticle(dailyArticle, false, "home_mission");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '16px',
+                          borderRadius: '16px',
+                          background: 'var(--primary)',
+                          color: 'white',
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+                        }}
+                      >
+                        {appLang === "ja" ? "🎯 今日のミッションを読む" : "🎯 Today's mission"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          navigateTo("home");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '16px',
+                          borderRadius: '16px',
+                          background: 'var(--primary)',
+                          color: 'white',
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+                        }}
+                      >
+                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
+                      </button>
+                    )
+                  ) : (
+                    /* vocabReviewReturnTo === "words" */
+                    <button
+                      onClick={() => {
+                        checkAndAwardVocabReviewXP();
+                        handleBack("words");
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '16px',
+                        borderRadius: '16px',
+                        background: 'var(--primary)',
+                        color: 'white',
+                        fontSize: '1.05rem',
+                        fontWeight: 700,
+                        border: 'none',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+                      }}
+                    >
+                      {appLang === "ja" ? "単語帳に戻る" : "Back to Vocabulary"}
+                    </button>
+                  )}
+
+                  {/* SECONDARY CTA */}
+                  {dueRemaining > 0 ? (
+                    vocabReviewReturnTo === "words" ? (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          handleBack("words");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '14px',
+                          borderRadius: '16px',
+                          background: 'var(--bg)',
+                          color: 'var(--text-main)',
+                          fontSize: '0.98rem',
+                          fontWeight: 600,
+                          border: '1px solid var(--border)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {appLang === "ja" ? "単語帳に戻る" : "Back to Vocabulary"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          navigateTo("home");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '14px',
+                          borderRadius: '16px',
+                          background: 'var(--bg)',
+                          color: 'var(--text-main)',
+                          fontSize: '0.98rem',
+                          fontWeight: 600,
+                          border: '1px solid var(--border)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
+                      </button>
+                    )
+                  ) : (
+                    /* dueRemaining === 0 */
+                    (vocabReviewReturnTo === "reading" && (nextRewardEp || nextRewardArticle)) ? (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          navigateTo("home");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '14px',
+                          borderRadius: '16px',
+                          background: 'var(--bg)',
+                          color: 'var(--text-main)',
+                          fontSize: '0.98rem',
+                          fontWeight: 600,
+                          border: '1px solid var(--border)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
+                      </button>
+                    ) : vocabReviewReturnTo === "home" && (continueTarget || (dailyArticle && !isMissionCompletedToday)) ? (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          navigateTo("home");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '14px',
+                          borderRadius: '16px',
+                          background: 'var(--bg)',
+                          color: 'var(--text-main)',
+                          fontSize: '0.98rem',
+                          fontWeight: 600,
+                          border: '1px solid var(--border)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
+                      </button>
+                    ) : vocabReviewReturnTo === "words" ? (
+                      <button
+                        onClick={() => {
+                          checkAndAwardVocabReviewXP();
+                          navigateTo("home");
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '14px',
+                          borderRadius: '16px',
+                          background: 'var(--bg)',
+                          color: 'var(--text-main)',
+                          fontSize: '0.98rem',
+                          fontWeight: 600,
+                          border: '1px solid var(--border)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
+                      </button>
+                    ) : null
+                  )}
+                </div>
+              </div>
+            )}
         </main>
       )}
 
@@ -2349,7 +3253,10 @@ return (
                   {t.words.title}
                 </h2>
                 <button
-                  onClick={() => setNewListModalOpen(true)}
+                  onClick={(e) => {
+                    newListTriggerRef.current = e.currentTarget;
+                    setNewListModalOpen(true);
+                  }}
                   style={{
                     background: "var(--primary)",
                     color: "white",
@@ -2367,9 +3274,10 @@ return (
 
               <div style={{ display: "grid", gap: "12px" }}>
                 {/* System list (read-only): learned from completed articles */}
-                <div
+                <button
+                  type="button"
                   onClick={() => setCurrentListId(LEARNED_LIST_ID)}
-                  className="quiz-card"
+                  className="quiz-card reset-button"
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
@@ -2379,6 +3287,8 @@ return (
                     marginBottom: 0,
                     background: "linear-gradient(135deg, var(--primary-light), var(--surface) 70%)",
                     border: "1px solid var(--primary-light)",
+                    width: "100%",
+                    textAlign: "left"
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "14px", minWidth: 0 }}>
@@ -2420,23 +3330,26 @@ return (
                   >
                     <polyline points="9 18 15 12 9 6"></polyline>
                   </svg>
-                </div>
+                </button>
 
                 {wordLists.map((list) => {
                   const count = savedWords.filter(
                     (w) => (w.listId || "default") === list.id
                   ).length;
                   return (
-                    <div
+                    <button
                       key={list.id}
+                      type="button"
                       onClick={() => setCurrentListId(list.id)}
-                      className="quiz-card"
+                      className="quiz-card reset-button"
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
                         cursor: "pointer",
                         marginBottom: 0,
+                        width: "100%",
+                        textAlign: "left"
                       }}
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -2486,7 +3399,7 @@ return (
                       >
                         <polyline points="9 18 15 12 9 6"></polyline>
                       </svg>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -2533,24 +3446,35 @@ return (
                   </h2>
                 </div>
                 
-                {learnedWords.length > 0 && (
-                  <button
-                    onClick={() => startVocabReview("learned")}
-                    style={{
-                      background: "var(--primary)",
-                      color: "white",
-                      border: "none",
-                      padding: "8px 16px",
-                      borderRadius: "20px",
-                      fontSize: "0.9rem",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                    }}
-                  >
-                    {appLang === "ja" ? "復習する" : "Review"}
-                  </button>
-                )}
+                {(() => {
+                  if (learnedWords.length === 0) return null;
+                  const stats = getReviewStats(learnedWords, nowMs);
+                  const hasDue = stats.dueToday > 0;
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                        {stats.dueToday} {appLang === "ja" ? "件" : "due"}
+                      </div>
+                      <button
+                        disabled={!hasDue}
+                        onClick={() => startVocabReview("learned", "words")}
+                        style={{
+                          background: hasDue ? "var(--primary)" : "var(--bg)",
+                          color: hasDue ? "white" : "var(--text-muted)",
+                          border: "none",
+                          padding: "8px 16px",
+                          borderRadius: "20px",
+                          fontSize: "0.9rem",
+                          fontWeight: 700,
+                          cursor: hasDue ? "pointer" : "not-allowed",
+                          boxShadow: hasDue ? "0 2px 8px rgba(0,0,0,0.1)" : "none",
+                        }}
+                      >
+                        {appLang === "ja" ? "復習する" : "Review"}
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
 
               {learnedWords.length === 0 ? (
@@ -2583,21 +3507,27 @@ return (
                     <div style={{ minWidth: 0 }}>
                       <h3
                         lang="fr"
-                        className="tap-word"
-                        onClick={(e) => handleWordClick(e, lw.word, "")}
                         style={{
-                          color: "var(--primary)",
                           margin: 0,
                           fontSize: "1.15rem",
                           fontWeight: 700,
-                          wordBreak: "break-word",
-                          cursor: "pointer",
-                          textDecoration: "underline",
-                          textDecorationColor: "var(--border)",
-                          textUnderlineOffset: "4px"
+                          wordBreak: "break-word"
                         }}
                       >
-                        {lw.word}
+                        <button
+                          type="button"
+                          className="tap-word reset-button interactive-word"
+                          onClick={(e) => handleWordClick(e, lw.word, "")}
+                          style={{
+                            color: "var(--primary)",
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                            textDecorationColor: "var(--border)",
+                            textUnderlineOffset: "4px"
+                          }}
+                        >
+                          {lw.word}
+                        </button>
                       </h3>
                       <span
                         style={{
@@ -2614,6 +3544,7 @@ return (
                     <button
                       onClick={() => speakWord(lw.word)}
                       title={t.words.listenPronunciation}
+                      aria-label={t.words.listenPronunciation}
                       style={{
                         background: "var(--bg)",
                         border: "1px solid var(--border)",
@@ -2779,6 +3710,7 @@ return (
                         <button
                           onClick={() => speakWord(word.fr)}
                           title={t.words.listenPronunciation}
+                          aria-label={t.words.listenPronunciation}
                           style={{
                             background: "var(--bg)",
                             border: "1px solid var(--border)",
@@ -2854,10 +3786,21 @@ return (
 
       {/* Dictionary Floating Popup */}
       {dictOpen && (
-        <div
-          ref={popupRef}
+        <dialog
+          ref={(node) => {
+            popupRef.current = node;
+            if (node && !node.open) {
+              node.showModal();
+            }
+          }}
           className={`dict-popup ${arrowTop ? "arrow-top" : ""}`}
-          style={popupStyle}
+          style={{ ...popupStyle, margin: 0 }}
+          onClose={() => setDictOpen(false)}
+          onClick={(e) => {
+            if (e.target === popupRef.current) {
+              setDictOpen(false);
+            }
+          }}
         >
           <div className="dict-header">
             <div className="dict-word-container">
@@ -2885,11 +3828,13 @@ return (
               <button
                 className="dict-save-btn"
                 title={t.dict.saveToList}
-                onClick={() => {
+                aria-label={t.dict.saveToList}
+                onClick={(e) => {
                   if (!dictData) return;
                   if (wordLists.length <= 1) {
                     saveWordToList(wordLists[0]?.id || "default");
                   } else {
+                    listSelectorTriggerRef.current = e.currentTarget;
                     setListSelectorOpen(true);
                   }
                 }}
@@ -2911,6 +3856,7 @@ return (
               <button
                 className="dict-audio-btn"
                 title={t.words.listenPronunciation}
+                aria-label={t.words.listenPronunciation}
                 onClick={() => {
                   if (dictData) speakWord(dictData.mot);
                 }}
@@ -2923,6 +3869,30 @@ return (
                     stroke="currentColor"
                     strokeWidth="2"
                   ></path>
+                </svg>
+              </button>
+              <button
+                className="dict-close-btn"
+                aria-label="Fermer"
+                title="Fermer"
+                onClick={() => setDictOpen(false)}
+                autoFocus
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  width: "44px",
+                  height: "44px",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
               </button>
             </div>
@@ -2951,7 +3921,7 @@ return (
               )}
             </div>
           )}
-        </div>
+        </dialog>
       )}
 
       {/* Audio Player Bottom Sheet (Visible in Reading View) */}
@@ -2967,12 +3937,18 @@ return (
           <button
             onClick={handleRestartAudio}
             title={t.reading.restartAudio}
+            aria-label={t.reading.restartAudio}
             style={{
               background: "none",
               border: "none",
               color: "var(--text-main)",
               cursor: "pointer",
-              padding: "6px",
+              width: "44px",
+              height: "44px",
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             <svg
@@ -2993,12 +3969,18 @@ return (
           <button
             onClick={handlePrevSentence}
             title={t.reading.prevSentence}
+            aria-label={t.reading.prevSentence}
             style={{
               background: "none",
               border: "none",
               color: "var(--text-main)",
               cursor: "pointer",
-              padding: "6px",
+              width: "44px",
+              height: "44px",
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             <svg
@@ -3019,6 +4001,7 @@ return (
           <button
             onClick={handlePlayPause}
             title={t.reading.playPause}
+            aria-pressed={isPlaying && !isPaused}
             style={{
               background:
                 isPlaying && !isPaused
@@ -3053,12 +4036,18 @@ return (
           <button
             onClick={handleNextSentence}
             title={t.reading.nextSentence}
+            aria-label={t.reading.nextSentence}
             style={{
               background: "none",
               border: "none",
               color: "var(--text-main)",
               cursor: "pointer",
-              padding: "6px",
+              width: "44px",
+              height: "44px",
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             <svg
@@ -3140,7 +4129,7 @@ return (
             onClick={() => {
               stopAudio();
               setDictOpen(false);
-              setActiveView("home");
+              navigateTo("home", undefined, true);
             }}
           >
             <svg
@@ -3162,7 +4151,7 @@ return (
               stopAudio();
               setDictOpen(false);
               setCurrentListId(null);
-              setActiveView("words");
+              navigateTo("words", undefined, true);
             }}
           >
             <svg
@@ -3182,22 +4171,51 @@ return (
       )}
 
       {/* Filter Modal (Level / Category) */}
-      {filterModalType !== null && (
-        <div
-          className="modal-overlay"
-          onClick={() => setFilterModalType(null)}
-        >
-          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-            <div
-              style={{
-                width: "40px",
-                height: "5px",
-                background: "#e5e5ea",
-                borderRadius: "3px",
-                margin: "0 auto 18px auto",
-              }}
-            />
+      <dialog
+        ref={filterDialogRef}
+        className="filter-dialog"
+        onClose={() => setFilterModalType(null)}
+        onClick={(e) => {
+          if (e.target === filterDialogRef.current) {
+            setFilterModalType(null);
+          }
+        }}
+        aria-labelledby="filter-dialog-title"
+      >
+        {filterModalType !== null && (
+          <div className="modal-sheet" style={{ margin: "0 auto", maxWidth: "520px" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ position: "relative" }}>
+              <div
+                style={{
+                  width: "40px",
+                  height: "5px",
+                  background: "#e5e5ea",
+                  borderRadius: "3px",
+                  margin: "0 auto 18px auto",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setFilterModalType(null)}
+                aria-label="Fermer"
+                style={{
+                  position: "absolute",
+                  top: "-15px",
+                  right: "0",
+                  background: "none",
+                  border: "none",
+                  fontSize: "1.5rem",
+                  cursor: "pointer",
+                  color: "var(--text-secondary)",
+                  padding: "4px",
+                  lineHeight: "1"
+                }}
+              >
+                &times;
+              </button>
+            </div>
             <h3
+              id="filter-dialog-title"
               style={{
                 textAlign: "center",
                 fontSize: "1.15rem",
@@ -3230,8 +4248,8 @@ return (
                       }}
                       onClick={() => {
                         stopAudio();
-                        setGlobalLevel(lvl);
-                        updateUserState({ level: lvl });
+                        
+                        mutateUserState({ level: lvl });
                         
                         // Clear any pending quiz progression timeout
                         if (quizTimerRef.current) {
@@ -3290,28 +4308,35 @@ return (
                   })}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </dialog>
 
       {/* List Selector Modal (when saving a word and multiple lists exist) */}
-      {listSelectorOpen && (
-        <div
-          className="modal-overlay"
-          style={{ alignItems: "center" }}
-          onClick={() => setListSelectorOpen(false)}
-        >
+      <dialog
+        ref={listSelectorDialogRef}
+        className="list-selector-dialog"
+        onClose={() => setListSelectorOpen(false)}
+        onClick={(e) => {
+          if (e.target === listSelectorDialogRef.current) {
+            setListSelectorOpen(false);
+          }
+        }}
+        aria-labelledby="list-selector-title"
+      >
+        {listSelectorOpen && (
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
               background: "var(--surface)",
               padding: "24px",
               borderRadius: "20px",
-              width: "88%",
+              width: "88vw",
               maxWidth: "340px",
               boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              margin: "0 auto",
             }}
           >
-            <h3 style={{ textAlign: "center", fontSize: "1.15rem", fontWeight: 700, marginBottom: "16px" }}>
+            <h3 id="list-selector-title" style={{ textAlign: "center", fontSize: "1.15rem", fontWeight: 700, marginBottom: "16px" }}>
               {t.words.selectListToSave}
             </h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -3361,16 +4386,22 @@ return (
               {t.words.cancel}
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </dialog>
 
       {/* Create New List Modal */}
-      {newListModalOpen && (
-        <div
-          className="modal-overlay"
-          style={{ alignItems: "center" }}
-          onClick={() => setNewListModalOpen(false)}
-        >
+      <dialog
+        ref={newListDialogRef}
+        className="new-list-dialog"
+        onClose={() => setNewListModalOpen(false)}
+        onClick={(e) => {
+          if (e.target === newListDialogRef.current) {
+            setNewListModalOpen(false);
+          }
+        }}
+        aria-labelledby="new-list-title"
+      >
+        {newListModalOpen && (
           <form
             onSubmit={handleCreateList}
             onClick={(e) => e.stopPropagation()}
@@ -3378,12 +4409,13 @@ return (
               background: "var(--surface)",
               padding: "24px",
               borderRadius: "20px",
-              width: "88%",
+              width: "88vw",
               maxWidth: "340px",
               boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              margin: "0 auto",
             }}
           >
-            <h3 style={{ textAlign: "center", fontSize: "1.1rem", fontWeight: 700, marginBottom: "14px" }}>
+            <h3 id="new-list-title" style={{ textAlign: "center", fontSize: "1.1rem", fontWeight: 700, marginBottom: "14px" }}>
               {t.words.newListNameTitle}
             </h3>
             <input
@@ -3393,6 +4425,7 @@ return (
               value={newListName}
               onChange={(e) => setNewListName(e.target.value)}
               placeholder={t.words.newListPlaceholder}
+              aria-labelledby="new-list-title"
               style={{
                 width: "100%",
                 padding: "12px",
@@ -3436,20 +4469,26 @@ return (
               </button>
             </div>
           </form>
-        </div>
-      )}
+        )}
+      </dialog>
 
       {/* Newsletter 3-Step Profile Registration Modal */}
-      {leadModalOpen && (
-        <div
-          className="modal-overlay"
-          onClick={() => setLeadModalOpen(false)}
-        >
+      <dialog
+        ref={leadDialogRef}
+        className="lead-dialog"
+        onClose={() => setLeadModalOpen(false)}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setLeadModalOpen(false);
+          }
+        }}
+        aria-labelledby="lead-modal-title"
+      >
+        {leadModalOpen && (
           <form
             className="modal-sheet"
-            style={{ maxWidth: "440px" }}
+            style={{ maxWidth: "440px", margin: "0 auto", boxSizing: "border-box" }}
             onSubmit={handleLeadProfileSubmit}
-            onClick={(e) => e.stopPropagation()}
           >
             {/* Header + Close Button */}
             <div
@@ -3460,11 +4499,12 @@ return (
                 marginBottom: "10px",
               }}
             >
-              <h3 style={{ fontSize: "1.15rem", fontWeight: 800, color: "var(--primary)" }}>
+              <h3 id="lead-modal-title" style={{ fontSize: "1.15rem", fontWeight: 800, color: "var(--primary)" }}>
                 {t.newsletter.title}
               </h3>
               <button
                 type="button"
+                aria-label="Fermer"
                 onClick={() => setLeadModalOpen(false)}
                 style={{
                   background: "var(--bg)",
@@ -3547,6 +4587,7 @@ return (
             {leadStep === 1 && (
               <div className="fade-in">
                 <label
+                  htmlFor="lead-first-name"
                   style={{
                     display: "block",
                     fontSize: "0.84rem",
@@ -3557,6 +4598,7 @@ return (
                   {t.newsletter.name}
                 </label>
                 <input
+                  id="lead-first-name"
                   type="text"
                   required
                   autoFocus
@@ -3579,6 +4621,7 @@ return (
                 />
 
                 <label
+                  htmlFor="lead-email"
                   style={{
                     display: "block",
                     fontSize: "0.84rem",
@@ -3589,6 +4632,7 @@ return (
                   {t.newsletter.email}
                 </label>
                 <input
+                  id="lead-email"
                   type="email"
                   required
                   value={leadEmail}
@@ -3841,8 +4885,11 @@ return (
               </div>
             )}
           </form>
-        </div>
-      )}
+        )}
+      </dialog>
     </div>
   );
 }
+
+
+
