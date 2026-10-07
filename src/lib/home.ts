@@ -133,3 +133,16 @@ export const getNextReviewDayOffset = (vocabulary: LearnedWord[], now: number): 
   if (next === Infinity) return null;
   return Math.max(0, Math.round(localDayIndex(next) - localDayIndex(now)));
 };
+
+export function determineNextBestActionType(
+  dueReviewCount: number,
+  hasContinueTarget: boolean,
+  hasDailyArticle: boolean,
+  isMissionCompletedToday: boolean
+): "review" | "continue" | "mission" | "explore" {
+  if (dueReviewCount > 0) return "review";
+  if (hasContinueTarget) return "continue";
+  if (hasDailyArticle && !isMissionCompletedToday) return "mission";
+  return "explore";
+}
+

@@ -1,0 +1,182 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.3 [39m[90mC:/Users/81704/Desktop/Code/FuragoWeb[39m
+
+[90mstdout[2m | src/components/navigation_and_post_srs.test.tsx[2m > [22m[2mNavigation and Post-SRS Integration[2m > [22m[2mPOST-SRS-03: directs to next episode when dueRemaining = 0 from Reward without returning to completion screen
+[22m[39m[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"app-shell"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"lead-bar"[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; justify-content: center; background: var(--primary); color: white; padding: 10px 16px; gap: 12px; flex-wrap: wrap;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"font-weight: 700; white-space: nowrap; font-size: 0.95rem;"[39m
+        [36m>[39m
+          [0m譛譁ｰ險倅ｺ九ｒ繝｡繝ｼ繝ｫ縺ｧ縺雁ｱ翫￠・∫┌譁吶Γ繝ｫ繝槭ぎ逋ｻ骭ｲ[0m
+        [36m</span>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"lead-bar-form"[39m
+          [33mstyle[39m=[32m"display: flex; gap: 8px; align-items: center;"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Adresse email"[39m
+            [33mclass[39m=[32m"lead-bar-input"[39m
+            [33mplaceholder[39m=[32m"e.g. taro@furago.com"[39m
+            [33mstyle[39m=[32m"padding: 6px 12px; border-radius: 16px; border: medium; outline: none; font-size: 0.85rem;"[39m
+            [33mtype[39m=[32m"email"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"lead-bar-btn"[39m
+            [33mstyle[39m=[32m"background: white; color: var(--primary); border: medium; border-radius: 16px; padding: 6px 12px; font-weight: 700; cursor: pointer; font-size: 0.85rem;"[39m
+            [33mtype[39m=[32m"submit"[39m
+          [36m>[39m
+            [0m逋ｻ骭ｲ[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Close"[39m
+            [33mstyle[39m=[32m"background: transparent; border: medium; color: rgba(255, 255, 255, 0.8); cursor: pointer; padding: 2px 4px; font-size: 1.2rem; line-height: 1;"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mﾃ・[0m
+          [36m</button>[39m
+        [36m</form>[39m
+      [36m</div>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"app-header"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"header-left"[39m
+        [36m>[39m
+          [36m<h1[39m
+            [33mclass[39m=[32m"header-title"[39m
+            [33mstyle[39m=[32m"margin-left: 0px;"[39m
+          [36m>[39m
+            [0mFurago[0m
+          [36m</h1>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"header-right"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"lang-toggle-container"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"lang-toggle-btn active"[39m
+            [36m>[39m
+              [0m・・[0m
+              [36m<span[39m
+                [33mclass[39m=[32m"lang-text"[39m
+              [36m>[39m
+                [0m JP[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"lang-toggle-btn "[39m
+            [36m>[39m
+              [0m・・[0m
+              [36m<span[39m
+                [33mclass[39m=[32m"lang-text"[39m
+              [36m>[39m
+                [0m EN[0m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<main[39m
+        [33mclass[39m=[32m"view fade-in"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"filters-bar"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"filter-btn"[39m
+          [36m>[39m
+            [0m繝ｬ繝吶Ν[0m
+            [0m : [0m
+            [0m雜・・邏・[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"filter-btn"[39m
+          [36m>[39m
+            [0m繧ｫ繝・ざ繝ｪ繝ｼ[0m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"padding: 16px 16px 0px; max-width: 100%; box-sizing: border-box;"[39m
+        [36m>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"騾ｲ謐・[39m
+            [33mstyle[39m=[32m"background: var(--surface); border-radius: 18px; border: 1px solid var(--border); padding: 14px 16px; margin-bottom: 4px; box-sizing: border-box; max-width: 100%;"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mstyle[39m=[32m"display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mstyle[39m=[32m"display: flex; align-items: baseline; gap: 8px; min-width: 0px;"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mstyle[39m=[32m"font-size: 1.15rem; font-weight: 800; color: var(--text-main);"[39m
+                [36m>[39m
+                  [0m繝ｬ繝吶Ν 1[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mstyle[39m=[32m"font-size: 0.9rem; font-weight: 700; color: var(--text-muted);"[39m
+                [36m>[39m
+                  [0m0[0m
+                  [0m XP[0m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<span[39m
+                [33mstyle[39m=[32m"font-size: 0.95rem; font-weight: 800; color: var(--text-muted);"[39m
+              [36m>[39m
+                [0m櫨 [0m
+                [0m0[0m
+                [0m [0m
+                [0m譌･[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33maria-label[39m=[32m"谺｡縺ｮ繝ｬ繝吶Ν縺ｾ縺ｧ"[39m
+              [33maria-valuemax[39m=[32m"100"[39m
+              [33maria-valuemin[39m=[32m"0"[39m
+              [33maria-valuenow[39m=[32m"0"[39m
+              [33mrole[39m=[32m"progressbar"[39m
+              [33mstyle[39m=[32m"height: 8px; border-radius: 8px; background: var(--bg); overflow: hidden; margin: 10px 0px 8px;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mstyle[39m=[32m"width: 0%; height: 100%; background: var(--primary); border-radius: 8px; transition: width 0.3s;"[39m
+              [36m/>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mstyle[39m=[32m"display: flex; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; font-size: 0.82rem; font-weight: 600; color: var(--text-muted);"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0m繝ｬ繝吶Ν2縺ｾ縺ｧ縺ゅ→ 100 XP[0m
+              [36m</span>[39m
+              [36m<span>[39m
+                [0m莉頑律縺九ｉ繧ｹ繝医Μ繝ｼ繧ｯ繧貞ｧ九ａ繧医≧[0m
+              [36m</span>[39m
+            [36m</div>[39m
+          [36m</section>[39m
+          [36m<section[39m
+            [33maria-labelledby[39m=[32m"home-review"[39m
+          [36m>[39m
+            [36m<h2[39m
+              [3...
+
+ [31m笶ｯ[39m src/components/navigation_and_post_srs.test.tsx [2m([22m[2m4 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 2089[2mms[22m[39m
+   [31m笶ｯ[39m Navigation and Post-SRS Integration [2m(4)[22m
+     [33m[2m笨・[22m[39m NAV-01: manages historyIdx on push/replace and delegates to history.back only when historyIdx > 0[33m 307[2mms[22m[39m
+     [32m笨・[39m POST-SRS-01: recording an answer during an SRS session updates learnedVocabulary in UserState[32m 263[2mms[22m[39m
+     [33m[2m笨・[22m[39m POST-SRS-02: shows dueRemaining and 'Continue review' CTA when remaining due words exist[33m 373[2mms[22m[39m
+[31m     [31mﾃ・[31m POST-SRS-03: directs to next episode when dueRemaining = 0 from Reward without returning to completion screen[39m[33m 1144[2mms[22m[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (4)[39m
+[2m   Start at [22m 23:34:29
+[2m   Duration [22m 3.97s[2m (tests 55%, environment 32%, import 7%, transform 6%)[22m
+

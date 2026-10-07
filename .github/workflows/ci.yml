@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  ci:
+    name: Safety Net & Build Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Clean install dependencies
+        run: npm ci
+
+      - name: Run automated test suite (Vitest)
+        run: npm test
+
+      - name: Type check (TypeScript)
+        run: npx tsc --noEmit
+
+      - name: Build static export (Next.js for Cloudflare Pages)
+        run: npm run build
+
+      # NOTE: ESLint is intentionally not included as a blocking check at this stage
+      # due to KNOWN EXISTING LINT DEBT in src/components/FuragoApp.tsx.
+      # It will be integrated as a blocking check during the dedicated FuragoApp.tsx refactor task.
+

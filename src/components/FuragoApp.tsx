@@ -1,7 +1,7 @@
 "use client";
 
 import { loadUserState, updateUserState, UserState, LearnedWord, mergeLearnedVocabulary } from "../lib/userState";
-import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset } from "../lib/home";
+import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset, determineNextBestActionType } from "../lib/home";
 import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
 import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "../lib/analytics";
 import React, { useEffect, useState, useRef, useCallback } from "react";
@@ -1777,13 +1777,12 @@ export default function FuragoApp({
   const continuePercent = Math.round(continueRatio * 100);
   
   const missionIsContinue = !!dailyArticle && !!continueTarget && String(dailyArticle.id) === String(continueTarget.id);
-  const primaryHomeAction: "continue" | "mission" | "review" | "none" = continueTarget
-    ? "continue"
-    : dailyArticle && !isMissionCompletedToday
-      ? "mission"
-      : dueReviewCount > 0
-        ? "review"
-        : "none";
+  const nextBestActionType = determineNextBestActionType(
+    dueReviewCount,
+    !!continueTarget,
+    !!dailyArticle,
+    isMissionCompletedToday
+  );
   const recommendedArticles = selectRecommendedArticles(
     filteredArticles,
     completedArticleIds,
@@ -2334,7 +2333,7 @@ return (
                   <button onClick={() => {
                     trackEvent("home_cta_clicked", { cta_type: "continue", position: 1 });
                     openArticle(continueTarget, false, "home_continue");
-                  }} style={{ ...homeCta(primaryHomeAction === 'continue'), marginTop: '12px' }}>
+                  }} style={{ ...homeCta(nextBestActionType === 'continue'), marginTop: '12px' }}>
                     {continueArticle
                       ? (appLang === 'ja' ? '続きを読む' : 'Continue reading')
                       : (appLang === 'ja' ? '次のエピソードへ' : 'Next episode')}
@@ -2359,7 +2358,7 @@ return (
                       trackEvent("home_cta_clicked", { cta_type: "srs", position: 2 });
                       startVocabReview("learned", "home");
                     }}
-                    style={{ ...homeCta(primaryHomeAction === 'review'), width: 'auto', flex: '0 0 auto', padding: '12px 22px' }}
+                    style={{ ...homeCta(nextBestActionType === 'review'), width: 'auto', flex: '0 0 auto', padding: '12px 22px' }}
                   >
                     {appLang === 'ja' ? '復習する' : 'Review'}
                   </button>
@@ -2422,7 +2421,7 @@ return (
                     <button onClick={() => {
                       trackEvent("home_cta_clicked", { cta_type: "mission", position: 2 });
                       openArticle(dailyArticle, false, "home_mission");
-                    }} style={{ ...homeCta(primaryHomeAction === 'mission'), marginTop: '12px' }}>
+                    }} style={{ ...homeCta(nextBestActionType === 'mission'), marginTop: '12px' }}>
                       {t.reading.read}
                     </button>
                   </div>
