@@ -1848,12 +1848,13 @@ export default function FuragoApp({
         trackEvent("home_viewed", {
           srs_due_count: dueReviewCount,
           has_daily_mission: !!dailyArticle,
-          has_continue_article: !!continueTarget
+          has_continue_article: !!continueTarget,
+          streak_state: streakStatus.state
         });
         analyticsFiredRef.current[key] = true;
       }
     }
-  }, [activeView, dueReviewCount, dailyArticle, continueTarget]);
+  }, [activeView, dueReviewCount, dailyArticle, continueTarget, streakStatus.state]);
 
   // --- ANALYTICS: SRS SESSION COMPLETED ---
   useEffect(() => {
@@ -2098,6 +2099,21 @@ export default function FuragoApp({
         })()}
       </div>
     );
+  };
+
+  // --- 6.3-B: HABIT LAYER (streak nudge + daily habit summary) ---
+  const runHabitNudgeAction = () => {
+    trackEvent("home_cta_clicked", { cta_type: "habit_nudge", position: 0 });
+    if (nextBestActionType === "review") {
+      startVocabReview("learned", "home");
+    } else if (nextBestActionType === "continue" && continueTarget) {
+      openArticle(continueTarget, false, "home_continue");
+    } else if (nextBestActionType === "mission" && dailyArticle) {
+      openArticle(dailyArticle, false, "home_mission");
+    } else {
+      const el = document.getElementById("home-reco") || document.getElementById("home-catalog");
+      if (el) el.scrollIntoView({ behavior: "smooth" });
+    }
   };
 
   const renderHomeProgressWidget = () => {
@@ -2367,6 +2383,140 @@ export default function FuragoApp({
           </div>
 
           <div style={{ padding: '16px 16px 0', maxWidth: '100%', boxSizing: 'border-box' }}>
+            {/* 6.3-B: habit layer — streak nudge + daily habit summary */}
+            {streakStatus.state !== "none" && (
+              <section
+                data-testid="habit-nudge"
+                data-state={streakStatus.state}
+                aria-live="polite"
+                style={{
+                  marginBottom: 12,
+                  padding: "12px 14px",
+                  borderRadius: 14,
+                  border: `1px solid ${streakStatus.state === "done_today" ? "var(--border)" : "var(--primary)"}`,
+                  background: streakStatus.state === "done_today" ? "var(--surface)" : "var(--primary-light)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <span aria-hidden="true" style={{ fontSize: "1rem", lineHeight: 1.4 }}>
+                    {streakStatus.state === "done_today" ? "✓" : "🔥"}
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: "0.92rem", fontWeight: 800, color: "var(--text-main)" }}>
+                      {streakStatus.state === "done_today"
+                        ? t.habit.doneTodayTitle
+                        : streakStatus.state === "broken"
+                          ? t.habit.brokenTitle
+                          : t.habit.atRiskTitle}
+                    </p>
+                    <p style={{ margin: "2px 0 0", fontSize: "0.85rem", fontWeight: 600, color: "var(--text-muted)", overflowWrap: "anywhere" }}>
+                      {(streakStatus.state === "done_today"
+                        ? t.habit.doneTodayBody
+                        : streakStatus.state === "broken"
+                          ? t.habit.brokenBody
+                          : t.habit.atRiskBody
+                      ).replace("{streak}", String(streakStatus.display))}
+                    </p>
+                  </div>
+                </div>
+                {streakStatus.state !== "done_today" && (
+                  <button
+                    type="button"
+                    onClick={runHabitNudgeAction}
+                    style={{ ...homeCtaPrimary, minHeight: 44 }}
+                  >
+                    {nextBestActionType === "review"
+                      ? t.habit.ctaReview
+                      : nextBestActionType === "continue"
+                        ? t.habit.ctaContinue
+                        : nextBestActionType === "mission"
+                          ? t.habit.ctaMission
+                          : t.habit.ctaExplore}
+                  </button>
+                )}
+              </section>
+            )}
+            <section
+              data-testid="habit-summary"
+              aria-label={t.habit.title}
+              style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap" }}
+            >
+              <div
+                data-habit="mission"
+                data-done={isMissionCompletedToday ? "true" : "false"}
+                aria-label={`${t.habit.mission}: ${isMissionCompletedToday ? t.habit.statusDone : t.habit.statusPending}`}
+                style={{
+                    flex: "1 1 100px",
+                    minWidth: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    padding: "8px 6px",
+                    borderRadius: 12,
+                    border: `1px solid ${isMissionCompletedToday ? "var(--primary)" : "var(--border)"}`,
+                    background: isMissionCompletedToday ? "var(--surface)" : "var(--bg)",
+                    color: isMissionCompletedToday ? "var(--primary)" : "var(--text-muted)",
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    textAlign: "center"
+                  }}
+              >
+                <span aria-hidden="true">{isMissionCompletedToday ? "✓" : "○"}</span>
+                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{t.habit.mission}</span>
+              </div>
+              <div
+                data-habit="review"
+                data-done={isVocabReviewCompletedToday ? "true" : "false"}
+                aria-label={`${t.habit.review}: ${isVocabReviewCompletedToday ? t.habit.statusDone : t.habit.statusPending}`}
+                style={{
+                    flex: "1 1 100px",
+                    minWidth: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    padding: "8px 6px",
+                    borderRadius: 12,
+                    border: `1px solid ${isVocabReviewCompletedToday ? "var(--primary)" : "var(--border)"}`,
+                    background: isVocabReviewCompletedToday ? "var(--surface)" : "var(--bg)",
+                    color: isVocabReviewCompletedToday ? "var(--primary)" : "var(--text-muted)",
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    textAlign: "center"
+                  }}
+              >
+                <span aria-hidden="true">{isVocabReviewCompletedToday ? "✓" : "○"}</span>
+                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{t.habit.review}</span>
+              </div>
+              <div
+                data-habit="learningDay"
+                data-done={lastStreakDate === todayStr ? "true" : "false"}
+                aria-label={`${t.habit.learningDay}: ${lastStreakDate === todayStr ? t.habit.statusDone : t.habit.statusPending}`}
+                style={{
+                    flex: "1 1 100px",
+                    minWidth: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    padding: "8px 6px",
+                    borderRadius: 12,
+                    border: `1px solid ${lastStreakDate === todayStr ? "var(--primary)" : "var(--border)"}`,
+                    background: lastStreakDate === todayStr ? "var(--surface)" : "var(--bg)",
+                    color: lastStreakDate === todayStr ? "var(--primary)" : "var(--text-muted)",
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    textAlign: "center"
+                  }}
+              >
+                <span aria-hidden="true">{lastStreakDate === todayStr ? "✓" : "○"}</span>
+                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{t.habit.learningDay}</span>
+              </div>
+            </section>
             {/* B. CONTINUER — real in-progress article (or next episode of a finished series) */}
             {continueTarget && (
               <section aria-labelledby="home-continue">

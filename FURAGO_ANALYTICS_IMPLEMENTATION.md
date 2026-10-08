@@ -35,8 +35,8 @@ Un UUID `furago_analytics_session_id` et un timestamp `furago_analytics_last_act
 | Event | Déclencheur | Paramètres |
 | ----- | ----------- | ---------- |
 | `session_start` | A la création d'un nouveau session_id (montage de FuragoApp) | `streak`, `srs_due_count` |
-| `home_viewed` | Affichage de l'écran principal (dédupliqué via useRef) | `srs_due_count`, `has_daily_mission`, `has_continue_article` |
-| `home_cta_clicked` | Clic sur Continuer, Mission, Recommandé (sur Home) | `cta_type`, `position` |
+| `home_viewed` | Affichage de l'écran principal (dédupliqué via useRef) | `srs_due_count`, `has_daily_mission`, `has_continue_article`, `streak_state` |
+| `home_cta_clicked` | Clic sur Continuer, Mission, Recommandé (sur Home) ou CTA du streak nudge (6.3-B) | `cta_type` (`continue`, `mission`, `srs`, `recommendation`, `habit_nudge`), `position` (`0` = habit nudge) |
 | `article_started` | L'ouverture effective d'un article via `openArticle` | `article_id`, `source` |
 | `article_completed` | Lorsque l'utilisateur atteint l'écran de complétion | `article_id` |
 | `srs_session_started`| Au clic sur Réviser, lancement de la série de révision | `due_count` |

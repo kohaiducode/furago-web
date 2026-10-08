@@ -98,6 +98,24 @@ export const translations = {
       cancel: 'キャンセル',
       register: '登録',
       submit: '登録する'
+    },
+    habit: {
+      title: '今日の習慣',
+      mission: 'ミッション',
+      review: '復習ボーナス',
+      learningDay: '学習日',
+      statusDone: '完了',
+      statusPending: '未完了',
+      atRiskTitle: '今日の学習でストリークをつなげましょう',
+      atRiskBody: '{streak}日連続の学習記録です。今日の読書または復習で記録をつなげられます。',
+      doneTodayTitle: '今日の学習日は完了しました',
+      doneTodayBody: '{streak}日連続の学習を続けています。',
+      brokenTitle: '新しいストリークを始めましょう',
+      brokenBody: '今日の一読または復習で、新しい記録が始まります。',
+      ctaReview: '単語を復習する',
+      ctaContinue: '続きを読む',
+      ctaMission: '今日のミッションを読む',
+      ctaExplore: '記事を見つける'
     }
   },
   en: {
@@ -197,6 +215,24 @@ export const translations = {
       cancel: 'Cancel',
       register: 'Register',
       submit: 'Submit'
+    },
+    habit: {
+      title: "Today's habit",
+      mission: 'Mission',
+      review: 'Review bonus',
+      learningDay: 'Learning day',
+      statusDone: 'Done',
+      statusPending: 'Pending',
+      atRiskTitle: 'Keep your learning day going',
+      atRiskBody: 'You have a {streak}-day learning streak. Reading or reviewing today keeps it going.',
+      doneTodayTitle: "Today's learning day is secured",
+      doneTodayBody: 'You are on a {streak}-day learning streak.',
+      brokenTitle: 'Start a new streak today',
+      brokenBody: 'A single reading or review session today starts a new run.',
+      ctaReview: 'Review words',
+      ctaContinue: 'Continue reading',
+      ctaMission: "Read today's mission",
+      ctaExplore: 'Find an article'
     }
   }
 };

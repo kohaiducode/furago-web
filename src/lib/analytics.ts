@@ -1,3 +1,5 @@
+import type { StreakState } from "./home";
+
 export type EventName =
   | "session_start"
   | "home_viewed"
@@ -18,9 +20,10 @@ export interface AnalyticsEventParams {
     srs_due_count: number;
     has_daily_mission: boolean;
     has_continue_article: boolean;
+    streak_state: StreakState;
   };
   home_cta_clicked: {
-    cta_type: "continue" | "mission" | "srs" | "recommendation";
+    cta_type: "continue" | "mission" | "srs" | "recommendation" | "habit_nudge";
     position: number;
   };
   article_started: {
