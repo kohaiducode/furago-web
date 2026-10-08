@@ -2,7 +2,7 @@
 
 import React, { useMemo, useEffect, useRef, useCallback } from "react";
 import { UserState } from "@/lib/userState";
-import { derivePedagogicalProgress, PedagogicalGoal } from "@/lib/progress";
+import { derivePedagogicalProgress } from "@/lib/progress";
 import { getTranslation, AppLanguage } from "@/lib/i18n";
 import { trackEvent } from "@/lib/analytics";
 
@@ -20,8 +20,6 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
 
   const dashboardOpenedRef = useRef(false);
   const candoViewedRef = useRef(false);
-  const previousGoalRef = useRef<PedagogicalGoal | null>(null);
-  const completedGoalKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!dashboardOpenedRef.current) {
@@ -29,40 +27,6 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
       trackEvent("progress_dashboard_opened", {});
     }
   }, []);
-
-  useEffect(() => {
-    const isGoalAchieved = (g: PedagogicalGoal): boolean => {
-      switch (g.category) {
-        case "READING":
-          return reading.completedArticles >= g.target;
-        case "QUIZ":
-          return reading.perfectQuizResults >= g.target;
-        case "VOCABULARY":
-        case "CONSOLIDATION":
-        case "CONTENT_LEVEL":
-        default:
-          return vocabulary.wordsConsolidated >= g.target;
-      }
-    };
-
-    const candidates: PedagogicalGoal[] = [];
-    if (previousGoalRef.current) candidates.push(previousGoalRef.current);
-    if (goal) candidates.push(goal);
-
-    candidates.forEach((g) => {
-      const key = `${g.id}:${g.target}`;
-      if (completedGoalKeysRef.current.has(key)) return;
-      if (isGoalAchieved(g)) {
-        completedGoalKeysRef.current.add(key);
-        trackEvent("pedagogical_goal_completed", {
-          goal_id: g.id,
-          goal_category: g.category,
-        });
-      }
-    });
-
-    if (goal) previousGoalRef.current = goal;
-  }, [goal, vocabulary, reading]);
 
   const handleCandoSectionView = useCallback(() => {
     if (candoViewedRef.current) return;
@@ -107,7 +71,7 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
 
   // Render logic for dashboard
   return (
-    <main className="view fade-in progress-dashboard" style={{ padding: "16px", paddingBottom: "100px" }}>
+    <div className="view fade-in progress-dashboard" style={{ padding: "16px", paddingBottom: "100px" }}>
       <header style={{ marginBottom: "24px" }}>
         <h2 style={{ fontSize: "1.5rem", fontWeight: 800, margin: "0 0 8px 0" }}>
           {appLang === "ja" ? "マイプログレス" : "My Progress"}
@@ -298,7 +262,7 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
           ))}
         </div>
       </section>
-    </main>
+    </div>
   );
 }
 

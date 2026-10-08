@@ -201,26 +201,17 @@ describe("ProgressDashboard Analytics", () => {
     expect(candoCalls.length).toBe(1);
   });
 
-  it("ANALYTICS-PROGRESS-04: Goal achieved fires pedagogical_goal_completed once", () => {
+  it("ANALYTICS-PROGRESS-04: Dashboard does not emit pedagogical_goal_completed", () => {
     const { rerender } = render(<ProgressDashboard userState={getEmptyUserState()} appLang="ja" onGoalClick={vi.fn()} />);
     
-    // Initial render - goal not completed (0/10)
     expect(trackEventSpy).not.toHaveBeenCalledWith("pedagogical_goal_completed", expect.anything());
     
-    // Update state to complete the goal (10 consolidated words)
     const completedState = getGoalCompletionState();
     rerender(<ProgressDashboard userState={completedState} appLang="ja" onGoalClick={vi.fn()} />);
     
-    expect(trackEventSpy).toHaveBeenCalledWith("pedagogical_goal_completed", {
-      goal_id: "GOAL_VOCAB_START",
-      goal_category: "VOCABULARY",
-    });
-    
-    // Re-render with same completed state should not fire again
     rerender(<ProgressDashboard userState={completedState} appLang="ja" onGoalClick={vi.fn()} />);
-    
     const goalCompletedCalls = trackEventSpy.mock.calls.filter((call: unknown[]) => call[0] === "pedagogical_goal_completed");
-    expect(goalCompletedCalls.length).toBe(1);
+    expect(goalCompletedCalls.length).toBe(0);
   });
 
   it("ANALYTICS-PROGRESS-05: No PII in progress events", () => {

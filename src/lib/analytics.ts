@@ -2,7 +2,6 @@ export type EventName =
   | "session_start"
   | "home_viewed"
   | "home_cta_clicked"
-  | "home_secondary_action_click"
   | "article_started"
   | "article_completed"
   | "srs_session_started"
@@ -23,9 +22,6 @@ export interface AnalyticsEventParams {
   home_cta_clicked: {
     cta_type: "continue" | "mission" | "srs" | "recommendation";
     position: number;
-  };
-  home_secondary_action_click: {
-    cta_type: "continue" | "mission" | "srs" | "saved";
   };
   article_started: {
     article_id: string;

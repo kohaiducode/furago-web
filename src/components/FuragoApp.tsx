@@ -3,7 +3,7 @@
 import { loadUserState, updateUserState, UserState, LearnedWord, mergeLearnedVocabulary } from "../lib/userState";
 import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset, determineNextBestActionType } from "../lib/home";
 import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
-import { derivePedagogicalProgress } from "../lib/progress";
+import { derivePedagogicalProgress, checkGoalCompletion } from "../lib/progress";
 import ProgressDashboard from "./ProgressDashboard";
 import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "../lib/analytics";
 import React, { useEffect, useState, useRef, useCallback } from "react";
@@ -267,7 +267,15 @@ export default function FuragoApp({
     if (updates.xp !== undefined) {
       next.furagoLevel = Math.max(1, Math.floor(next.xp / 100) + 1);
     }
-    
+
+    const completedGoal = checkGoalCompletion(prev, next);
+    if (completedGoal) {
+      trackEvent("pedagogical_goal_completed", {
+        goal_id: completedGoal.id,
+        goal_category: completedGoal.category,
+      });
+    }
+
     userStateRef.current = next;
     import('../lib/userState').then(m => m.saveUserState(next));
     setReactUserState(next);

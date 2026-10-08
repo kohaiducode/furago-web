@@ -282,3 +282,43 @@ export const derivePedagogicalProgress = (state: UserState): PedagogicalProgress
     canDos: deriveCanDos(vocab, reading, consistency),
   };
 };
+
+const isPedagogicalGoalAchieved = (
+  goal: PedagogicalGoal,
+  progress: PedagogicalProgress
+): boolean => {
+  switch (goal.category) {
+    case "READING":
+      return progress.reading.completedArticles >= goal.target;
+    case "QUIZ":
+      return progress.reading.perfectQuizResults >= goal.target;
+    case "CONTENT_LEVEL": {
+      const highestWeight = progress.reading.highestCompletedContentLevel
+        ? LEVEL_WEIGHTS[progress.reading.highestCompletedContentLevel] || 0
+        : 0;
+      return highestWeight >= goal.target;
+    }
+    case "VOCABULARY":
+    case "CONSOLIDATION":
+      return progress.vocabulary.wordsConsolidated >= goal.target;
+  }
+};
+
+export const checkGoalCompletion = (
+  prevState: UserState,
+  nextState: UserState
+): PedagogicalGoal | null => {
+  const prevProgress = derivePedagogicalProgress(prevState);
+  const activeGoal = prevProgress.goal;
+
+  if (!activeGoal || isPedagogicalGoalAchieved(activeGoal, prevProgress)) {
+    return null;
+  }
+
+  const nextProgress = derivePedagogicalProgress(nextState);
+  return isPedagogicalGoalAchieved(activeGoal, nextProgress)
+    ? activeGoal
+    : null;
+};
+
+export { isPedagogicalGoalAchieved };

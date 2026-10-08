@@ -6,7 +6,9 @@ import {
   deriveCurrentPedagogicalGoal, 
   deriveCanDos,
   derivePedagogicalProgress,
-  getHighestCompletedContentLevel
+  getHighestCompletedContentLevel,
+  checkGoalCompletion,
+  isPedagogicalGoalAchieved
 } from './progress';
 import { UserState, LearnedWord } from './userState';
 
@@ -258,6 +260,127 @@ describe('Pedagogical Progress Engine', () => {
     expect(result.reading.completedArticles).toBe(2);
     expect(result.reading.completedByLevel["LVL_2"]).toBe(1);
     expect(result.reading.highestCompletedContentLevel).toBe("LVL_2");
+  });
+
+  it('ANALYTICS-PROGRESS-01: état déjà atteint => aucune completion de transition.', () => {
+    const completedState = createMockState({
+      learnedVocabulary: Array.from({ length: 10 }, (_, i) => ({
+        word: `word${i}`,
+        articleIds: ["art1"],
+        firstLearnedAt: 0,
+        lastReviewedAt: 0,
+        dueAt: 0,
+        interval: 30,
+        difficulty: "normal",
+        correctCount: 5,
+        wrongCount: 0,
+        reviewStreak: 4,
+      })),
+    });
+
+    expect(checkGoalCompletion(completedState, completedState)).toBeNull();
+  });
+
+  it('ANALYTICS-PROGRESS-02: transition réelle du goal vocabulaire => retourne le même goal.', () => {
+    const prevState = createMockState({
+      learnedVocabulary: Array.from({ length: 9 }, (_, i) => ({
+        word: `word${i}`,
+        articleIds: ["art1"],
+        firstLearnedAt: 0,
+        lastReviewedAt: 0,
+        dueAt: 0,
+        interval: 30,
+        difficulty: "normal",
+        correctCount: 5,
+        wrongCount: 0,
+        reviewStreak: 4,
+      })),
+    });
+    const nextState = {
+      ...prevState,
+      learnedVocabulary: [
+        ...prevState.learnedVocabulary,
+        {
+          word: "word9",
+          articleIds: ["art1"],
+          firstLearnedAt: 0,
+          lastReviewedAt: 0,
+          dueAt: 0,
+          interval: 30,
+          difficulty: "normal" as const,
+          correctCount: 5,
+          wrongCount: 0,
+          reviewStreak: 4,
+        },
+      ],
+    };
+
+    expect(checkGoalCompletion(prevState, nextState)).toMatchObject({
+      id: "GOAL_VOCAB_START",
+      category: "VOCABULARY",
+    });
+  });
+
+  it('ANALYTICS-PROGRESS-03: goal toujours incomplet => null.', () => {
+    const prevState = createMockState({
+      learnedVocabulary: Array.from({ length: 9 }, () => ({ interval: 30 } as LearnedWord)),
+    });
+    const nextState = createMockState({
+      learnedVocabulary: Array.from({ length: 9 }, () => ({ interval: 30 } as LearnedWord)),
+      completedArticles: ["art1"],
+    });
+
+    expect(checkGoalCompletion(prevState, nextState)).toBeNull();
+  });
+
+  it('ANALYTICS-PROGRESS-04: CONTENT_LEVEL utilise le niveau de contenu réellement terminé.', () => {
+    const goal = {
+      id: "GOAL_CONTENT_LEVEL_2",
+      title: "Niveau 2",
+      description: "Atteindre le niveau 2",
+      current: 1,
+      target: 2,
+      progressRatio: 0.5,
+      category: "CONTENT_LEVEL" as const,
+    };
+    const prevProgress = derivePedagogicalProgress(createMockState({
+      completedArticles: ["art1::LVL_1"],
+    }));
+    const nextProgress = derivePedagogicalProgress(createMockState({
+      completedArticles: ["art1::LVL_1", "art2::LVL_2"],
+    }));
+
+    expect(isPedagogicalGoalAchieved(goal, prevProgress)).toBe(false);
+    expect(isPedagogicalGoalAchieved(goal, nextProgress)).toBe(true);
+  });
+
+  it('ANALYTICS-PROGRESS-05: augmenter le niveau de contenu seul ne valide pas un autre goal actif.', () => {
+    const prevState = createMockState({
+      completedArticles: ["art1::LVL_1"],
+      learnedVocabulary: Array.from({ length: 9 }, () => ({ interval: 30 } as LearnedWord)),
+    });
+    const nextState = {
+      ...prevState,
+      completedArticles: ["art1::LVL_1", "art2::LVL_4"],
+    };
+
+    expect(checkGoalCompletion(prevState, nextState)).toBeNull();
+  });
+
+  it('ANALYTICS-PROGRESS-06: progression reading vers 3 articles valide le goal READING actif.', () => {
+    const prevState = createMockState({
+      learnedVocabulary: Array.from({ length: 10 }, () => ({ interval: 30 } as LearnedWord)),
+      completedArticles: ["art1", "art2"],
+    });
+    const nextState = {
+      ...prevState,
+      completedArticles: ["art1", "art2", "art3"],
+    };
+
+    expect(checkGoalCompletion(prevState, nextState)).toMatchObject({
+      id: "GOAL_READ_MORE",
+      category: "READING",
+    });
   });
 
 });
