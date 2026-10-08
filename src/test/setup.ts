@@ -35,4 +35,30 @@ if (typeof window !== "undefined") {
       writable: true,
     });
   }
+
+  // IntersectionObserver polyfill for tests: jsdom has no layout, so simulate
+  // the observed element already being inside the viewport when observed.
+  if (!window.IntersectionObserver) {
+    class MockIntersectionObserver {
+      root = null;
+      rootMargin = "";
+      thresholds: number[] = [];
+      constructor(
+        private callback: IntersectionObserverCallback,
+        private options?: IntersectionObserverInit
+      ) {}
+      observe(target: Element): void {
+        this.callback(
+          [{ isIntersecting: true, target, intersectionRatio: 1 } as unknown as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver
+        );
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+    window.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
+  }
 }

@@ -12,6 +12,7 @@ export const translations = {
     nav: {
       home: '記事',
       words: '単語帳',
+      progress: '進捗',
       register: '登録',
       leadBarText: '最新記事をメールでお届け！無料メルマガ登録',
       leadBarBtn: '登録',
@@ -110,6 +111,7 @@ export const translations = {
     nav: {
       home: 'Articles',
       words: 'Vocabulary',
+      progress: 'Progress',
       register: 'Register',
       leadBarText: 'Get the latest articles by email! Free newsletter',
       leadBarBtn: 'Register',

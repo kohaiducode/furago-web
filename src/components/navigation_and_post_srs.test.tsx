@@ -76,7 +76,11 @@ describe("Navigation and Post-SRS Integration", () => {
     });
 
     // 2. Open an article from the catalogue / list
-    const episodeLink = screen.getAllByText("Episode 1")[0];
+    // (We find the clickable button by checking its closest 'button' ancestor or just using the last occurrence)
+    const episodeLinks = screen.getAllByText("Episode 1");
+    // The widget shows the title in an h3, but the catalogue item is inside a button. 
+    // Usually the catalogue item is the last one in the DOM.
+    const episodeLink = episodeLinks[episodeLinks.length - 1];
     await act(async () => {
       fireEvent.click(episodeLink);
     });
@@ -143,7 +147,7 @@ describe("Navigation and Post-SRS Integration", () => {
     });
 
     // Find and click Home SRS CTA button ("復習する" / "Review")
-    const reviewCta = screen.getByRole("button", { name: /復習|Review/i });
+    const reviewCta = screen.getAllByRole("button", { name: /復習|Review/i })[0];
     await act(async () => {
       fireEvent.click(reviewCta);
     });
@@ -202,7 +206,7 @@ describe("Navigation and Post-SRS Integration", () => {
     });
 
     // Launch review from Home
-    const reviewCta = screen.getByRole("button", { name: /復習|Review/i });
+    const reviewCta = screen.getAllByRole("button", { name: /復習|Review/i })[0];
     await act(async () => {
       fireEvent.click(reviewCta);
     });

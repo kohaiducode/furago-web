@@ -3,6 +3,8 @@
 import { loadUserState, updateUserState, UserState, LearnedWord, mergeLearnedVocabulary } from "../lib/userState";
 import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset, determineNextBestActionType } from "../lib/home";
 import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
+import { derivePedagogicalProgress } from "../lib/progress";
+import ProgressDashboard from "./ProgressDashboard";
 import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "../lib/analytics";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
@@ -145,7 +147,7 @@ export default function FuragoApp({
   initialArticles: Article[];
 }) {
   // Navigation & Views: "home" | "reading" | "words"
-  const [activeView, setActiveView] = useState<"home" | "reading" | "words" | "vocab_review">("home");
+  const [activeView, setActiveView] = useState<"home" | "reading" | "words" | "vocab_review" | "progress">("home");
 
   // Track if events have been fired to prevent duplicate events on React re-renders
   const analyticsFiredRef = useRef<Record<string, boolean>>({});
@@ -889,6 +891,7 @@ export default function FuragoApp({
               trackEvent("mission_completed", { article_id: String(currentArticle.id) });
               totalXP += checkAndAwardDailyMissionXP();
             }
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setSessionReward({ xp: totalXP, vocab: artRes.newVocabCount });
           }
         }
@@ -943,6 +946,7 @@ export default function FuragoApp({
     try {
       const state = loadUserState();
       userStateRef.current = state;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setReactUserState(state);
       
       const wordsDue = (state.learnedVocabulary || []).filter(w => w.dueAt <= Date.now()).length;
@@ -1276,7 +1280,7 @@ export default function FuragoApp({
   };
 
   // Open an article
-  const openArticle = (article: Article, skipHistory = false, source?: "home_continue" | "home_mission" | "catalog" | "recommendation") => {
+  const openArticle = (article: Article, skipHistory = false, source?: "home_continue" | "home_mission" | "catalog" | "recommendation" | "home_progress_widget") => {
     if (quizTimerRef.current) {
       clearTimeout(quizTimerRef.current);
       quizTimerRef.current = null;
@@ -1315,7 +1319,8 @@ export default function FuragoApp({
     const query = new URLSearchParams(window.location.search);
     const urlView = query.get("view") as typeof activeView | null;
     
-    if (!urlView || !["home", "reading", "words", "vocab_review"].includes(urlView)) {
+    if (!urlView || !["home", "reading", "words", "vocab_review", "progress"].includes(urlView)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       navigateTo("home", undefined, true);
     } else {
       const state: Record<string, string | number | boolean> = { furago: true, view: urlView, historyIdx: window.history.state?.historyIdx || 0 };
@@ -1337,7 +1342,7 @@ export default function FuragoApp({
         const query = new URLSearchParams(window.location.search);
         const urlView = query.get("view") as typeof activeView | null;
         
-        if (urlView && ["home", "reading", "words", "vocab_review"].includes(urlView)) {
+        if (urlView && ["home", "reading", "words", "vocab_review", "progress"].includes(urlView)) {
           if (urlView === "vocab_review") {
             const returnTo = query.get("returnTo");
             if (returnTo) setVocabReviewReturnTo(returnTo as "home" | "words" | "reading");
@@ -1371,6 +1376,7 @@ export default function FuragoApp({
     if (id) {
       const art = articles.find(a => String(a.id) === id);
       if (art) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         openArticle(art, true);
       } else {
         navigateTo("home", undefined, true);
@@ -1791,6 +1797,7 @@ export default function FuragoApp({
     3
   );
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const getNextArticleFor = useCallback((article: Article | null): Article | null => {
     if (!article) return null;
     const validArticles = filteredArticles;
@@ -1812,6 +1819,7 @@ export default function FuragoApp({
     
     // Fallback: Just next article in the filtered list
     return validArticles[(currentIndex + 1) % validArticles.length];
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
   }, [filteredArticles, completedArticleIds]);
 
   const homeCard: React.CSSProperties = { background: "var(--surface)", borderRadius: "18px", border: "1px solid var(--border)", padding: "14px", marginBottom: "4px", boxSizing: "border-box", maxWidth: "100%" };
@@ -2083,7 +2091,115 @@ export default function FuragoApp({
       </div>
     );
   };
-return (
+
+  const renderHomeProgressWidget = () => {
+    const progressInfo = derivePedagogicalProgress(userState);
+
+    if (!progressInfo) {
+      return (
+        <section aria-labelledby="home-progress-widget" style={{ ...homeCard, padding: "16px", marginBottom: "24px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <h2 id="home-progress-widget" style={{ fontSize: "1.2rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
+              {appLang === "ja" ? "マイプログレス" : "Ma Progression"}
+            </h2>
+          </div>
+          <div style={{ textAlign: "center", padding: "12px", background: "var(--bg)", borderRadius: "12px" }}>
+            <span style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 600 }}>
+              {appLang === "ja" ? "最初の記事を読んで、プログレスを構築しましょう。" : "Commencez votre première lecture pour construire votre progression."}
+            </span>
+          </div>
+        </section>
+      );
+    }
+
+    const goal = progressInfo.goal;
+
+    return (
+      <section aria-labelledby="home-progress-widget" style={{ ...homeCard, padding: "16px", marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h2 id="home-progress-widget" style={{ fontSize: "1.2rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
+            {appLang === "ja" ? "マイプログレス" : "Ma Progression"}
+          </h2>
+          <button 
+            onClick={() => navigateTo("progress")}
+            className="reset-button"
+            style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--primary)", cursor: "pointer" }}
+          >
+            {appLang === "ja" ? "詳細を見る" : "Voir ma progression"}
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
+          <div style={{ background: "var(--bg)", padding: "12px", borderRadius: "12px" }}>
+            <div style={{ fontSize: "1.4rem", fontWeight: 900, color: "var(--primary)" }}>{progressInfo.vocabulary.wordsConsolidated}</div>
+            <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-muted)" }}>
+              {appLang === "ja" ? "定着した単語" : "Mots consolidés"}
+            </div>
+          </div>
+          <div style={{ background: "var(--bg)", padding: "12px", borderRadius: "12px" }}>
+            <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "var(--text-main)" }}>
+              {progressInfo.reading.highestCompletedContentLevel ? (t.levels[progressInfo.reading.highestCompletedContentLevel as keyof typeof t.levels] || progressInfo.reading.highestCompletedContentLevel) : (appLang === "ja" ? "未設定" : "Non renseigné")}
+            </div>
+            <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-muted)" }}>
+              {appLang === "ja" ? "学習中のレベル" : "Contenu travaillé"}
+            </div>
+          </div>
+        </div>
+
+        {goal ? (
+          <div style={{ background: "linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%)", padding: "16px", borderRadius: "12px", color: "white" }}>
+            <div style={{ fontSize: "0.85rem", fontWeight: 700, opacity: 0.9, marginBottom: "4px" }}>
+              {appLang === "ja" ? "現在の目標" : "Objectif actuel"}
+            </div>
+            <div style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: "12px" }}>
+              {goal.title}
+            </div>
+            
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+              <div style={{ flex: 1, background: "rgba(255,255,255,0.3)", height: "6px", borderRadius: "3px", overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(goal.progressRatio * 100)}%`, height: "100%", background: "white", borderRadius: "3px" }} />
+              </div>
+              <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>
+                {goal.current} / {goal.target}
+              </span>
+            </div>
+
+            <button
+              onClick={() => {
+                if (goal.category === "VOCABULARY" || goal.category === "CONSOLIDATION") {
+                  navigateTo("words");
+                } else if (goal.category === "READING" || goal.category === "QUIZ") {
+                  let targetArticle = recommendedArticles[0];
+                  if (goal.category === "QUIZ") {
+                    targetArticle = articles.find(a => !completedArticleIds.includes(String(a.id)) && a.levels[globalLevel]?.quiz && a.levels[globalLevel]?.quiz!.length > 0) || targetArticle;
+                  }
+                  if (targetArticle) {
+                    openArticle(targetArticle, false, "home_progress_widget");
+                  } else {
+                    const el = document.getElementById("home-reco") || document.getElementById("home-catalog") || window.document.body;
+                    if (el) el.scrollIntoView({ behavior: "smooth" });
+                  }
+                }
+              }}
+              style={{ width: "100%", padding: "12px", borderRadius: "12px", background: "white", color: "var(--primary)", fontWeight: 800, border: "none", cursor: "pointer" }}
+            >
+              {goal.category === "VOCABULARY" || goal.category === "CONSOLIDATION" 
+                ? (appLang === "ja" ? "単語を復習する" : "Réviser mes mots")
+                : (appLang === "ja" ? "記事を読む" : "Lire un article")}
+            </button>
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", padding: "12px", background: "var(--bg)", borderRadius: "12px" }}>
+            <span style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 600 }}>
+              {appLang === "ja" ? "学習を続けてプログレスを構築しましょう。" : "Continuez à apprendre pour construire votre progression."}
+            </span>
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  return (
     <div className="app-shell">
       {/* Toast Notification */}
       {toastMsg && (
@@ -2243,45 +2359,6 @@ return (
           </div>
 
           <div style={{ padding: '16px 16px 0', maxWidth: '100%', boxSizing: 'border-box' }}>
-            {/* A. PROGRESSION — where am I? */}
-            <section aria-label={appLang === 'ja' ? '進捗' : 'Progress'} style={{ ...homeCard, padding: '14px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }}>
-                  <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                    {appLang === 'ja' ? `レベル ${furagoLevel}` : `Level ${furagoLevel}`}
-                  </span>
-                  <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-muted)' }}>{totalXP} XP</span>
-                </div>
-                <span style={{ fontSize: '0.95rem', fontWeight: 800, color: streakStatus.display > 0 ? '#ff9500' : 'var(--text-muted)' }}>
-                  🔥 {streakStatus.display} {appLang === 'ja' ? '日' : (streakStatus.display === 1 ? 'day' : 'days')}
-                </span>
-              </div>
-              <div
-                role="progressbar"
-                aria-label={appLang === 'ja' ? '次のレベルまで' : 'Progress to next level'}
-                aria-valuemin={0}
-                aria-valuemax={levelProgress.xpIntoLevel + levelProgress.xpToNextLevel}
-                aria-valuenow={levelProgress.xpIntoLevel}
-                style={{ height: '8px', borderRadius: '8px', background: 'var(--bg)', overflow: 'hidden', margin: '10px 0 8px' }}
-              >
-                <div style={{ width: `${Math.round(levelProgress.ratio * 100)}%`, height: '100%', background: 'var(--primary)', borderRadius: '8px', transition: 'width 0.3s' }} />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px 12px', flexWrap: 'wrap', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                <span>
-                  {appLang === 'ja'
-                    ? `レベル${levelProgress.nextLevel}まであと ${levelProgress.xpToNextLevel} XP`
-                    : `${levelProgress.xpToNextLevel} XP to level ${levelProgress.nextLevel}`}
-                </span>
-                <span>
-                  {streakStatus.state === 'done_today'
-                    ? (appLang === 'ja' ? '今日のストリーク達成 ✓' : 'Streak kept today ✓')
-                    : streakStatus.state === 'at_risk'
-                      ? (appLang === 'ja' ? '今日1本読んでストリークを守ろう' : 'Read today to keep your streak')
-                      : (appLang === 'ja' ? '今日からストリークを始めよう' : 'Start a streak today')}
-                </span>
-              </div>
-            </section>
-
             {/* B. CONTINUER — real in-progress article (or next episode of a finished series) */}
             {continueTarget && (
               <section aria-labelledby="home-continue">
@@ -2429,7 +2506,11 @@ return (
               </section>
             )}
 
-            {/* E. RECOMMANDÉ — not completed, newest first, one per category first */}
+            
+            {/* WIDGET PROGRESSION (6.2-D) */}
+            {renderHomeProgressWidget()}
+            
+{/* E. RECOMMANDÉ — not completed, newest first, one per category first */}
             {recommendedArticles.length > 0 && (
               <section aria-labelledby="home-reco">
                 <h2 id="home-reco" style={homeSectionLabel}>{appLang === 'ja' ? 'あなたへのおすすめ' : 'Recommended for you'}</h2>
@@ -3923,6 +4004,28 @@ return (
         </dialog>
       )}
 
+      
+      {/* VIEW: PROGRESS */}
+      {activeView === "progress" && (
+        <main className="view fade-in">
+          <ProgressDashboard
+            userState={userState}
+            appLang={appLang}
+            onGoalClick={(cat: string) => {
+              if (cat === "VOCABULARY" || cat === "CONSOLIDATION") {
+                navigateTo("words");
+              } else if (cat === "READING" || cat === "QUIZ") {
+                navigateTo("home");
+                setTimeout(() => {
+                  const el = document.getElementById("home-reco") || document.getElementById("home-catalog");
+                  if (el) el.scrollIntoView({ behavior: "smooth" });
+                }, 100);
+              }
+            }}
+          />
+        </main>
+      )}
+
       {/* Audio Player Bottom Sheet (Visible in Reading View) */}
       <div className={`audio-panel ${activeView === "reading" ? "visible" : ""}`}>
         <div
@@ -4166,7 +4269,31 @@ return (
             </svg>
             {t.nav.words}
           </button>
+        
+          <button
+            className={`nav-item ${activeView === "progress" ? "active" : ""}`}
+            onClick={() => {
+              stopAudio();
+              setDictOpen(false);
+              navigateTo("progress", undefined, true);
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="24"
+              height="24"
+              stroke="currentColor"
+              strokeWidth="2"
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            {appLang === "ja" ? "プログレス" : "Progression"}
+          </button>
         </nav>
+
       )}
 
       {/* Filter Modal (Level / Category) */}

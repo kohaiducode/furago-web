@@ -7,7 +7,11 @@ export type EventName =
   | "article_completed"
   | "srs_session_started"
   | "srs_session_completed"
-  | "mission_completed";
+  | "mission_completed"
+  | "progress_dashboard_opened"
+  | "progress_goal_clicked"
+  | "cando_viewed"
+  | "pedagogical_goal_completed";
 
 export interface AnalyticsEventParams {
   session_start: { streak: number; srs_due_count: number };
@@ -25,12 +29,16 @@ export interface AnalyticsEventParams {
   };
   article_started: {
     article_id: string;
-    source: "home_continue" | "home_mission" | "catalog" | "recommendation";
+    source: "home_continue" | "home_mission" | "catalog" | "recommendation" | "home_progress_widget";
   };
   article_completed: { article_id: string };
   srs_session_started: { due_count: number };
   srs_session_completed: { reviewed_count: number; correct_count: number };
   mission_completed: { article_id: string };
+  progress_dashboard_opened: Record<string, never>;
+  progress_goal_clicked: { goal_id: string; goal_category: string };
+  cando_viewed: { unlocked_count: number; total_count: number };
+  pedagogical_goal_completed: { goal_id: string; goal_category: string };
 }
 
 // Generate a simple UUID v4 (uses crypto API if available, fallback otherwise)

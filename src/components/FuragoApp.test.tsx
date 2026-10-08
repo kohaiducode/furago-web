@@ -196,9 +196,14 @@ describe('FuragoApp 5.5-A Refactor Regression Tests', () => {
       expect(screen.getByText(/記事を完了しました|Article Completed/i)).toBeDefined();
     }, { timeout: 3000 });
     
-    const xpElement = container.querySelector('.stat-xp');
+    let xpElement: Element | null = null;
+    await waitFor(() => {
+      xpElement = container.querySelector('.stat-xp');
+      expect(xpElement).not.toBeNull();
+    }, { timeout: 3000 });
+    
     // Article(20) + Quiz(10) + Perfect(5) = 35. With daily mission (+10) = 45.
-    expect(xpElement?.textContent).toMatch(/35|45/);
+    expect((xpElement as Element | null)?.textContent).toMatch(/35|45/);
   });
   
   it('APP-08: Initial lead bar state corresponds to localStorage', () => {
