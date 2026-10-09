@@ -5,6 +5,12 @@ import type { SavedWord, UserState, WordList } from "../lib/userState";
 import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset, determineNextBestActionType, completedArticleId } from "../lib/home";
 import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
 import { checkGoalCompletion } from "../lib/progress";
+import {
+  extractUniqueCategories,
+  getCategoryFilterLabel,
+  getCategoryKey,
+  getCategoryLabel as resolveCategoryLabel,
+} from "../lib/category";
 import ProgressDashboard from "./ProgressDashboard";
 import DictionaryModal from "./DictionaryModal";
 import NewsletterModal from "./NewsletterModal";
@@ -56,16 +62,6 @@ const getSpeechVoiceOptions = (voices: SpeechSynthesisVoice[]) => {
       : `(男) ${maleNames[maleIndex++ % maleNames.length]}`;
     return { voice, label };
   });
-};
-
-const getArticleCategories = (articles: Article[] = []) => {
-  const categories = new Set<string>();
-  articles.forEach((article) => {
-    if (article.category) {
-      categories.add((typeof article.category === "string" ? article.category : (article.category?.ja || "")).trim());
-    }
-  });
-  return Array.from(categories);
 };
 
 const TargetVocabularyItem = ({ word, onClick }: { word: string, onClick: (e: React.MouseEvent<HTMLElement>, w: string, s: string) => void }) => {
@@ -290,8 +286,8 @@ export default function FuragoApp({
   const [catalogStatus, setCatalogStatus] = useState<"loading" | "success" | "offline" | "error">(
     (initialArticles && initialArticles.length > 0) ? "success" : "loading"
   );
-  const [allCategories, setAllCategories] = useState<string[]>(() => getArticleCategories(initialArticles));
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => getArticleCategories(initialArticles));
+  const [allCategories, setAllCategories] = useState<string[]>(() => extractUniqueCategories(initialArticles || []));
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => extractUniqueCategories(initialArticles || []));
   const [filterModalType, setFilterModalType] = useState<"level" | "category" | null>(null);
   const filterDialogRef = useRef<HTMLDialogElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -943,11 +939,7 @@ export default function FuragoApp({
               return dB - dA;
             });
             setArticles(valid);
-            const freshCats = new Set<string>();
-            valid.forEach((a: Article) => {
-              if (a.category) freshCats.add((typeof a.category === "string" ? a.category : (a.category?.ja || "")).trim());
-            });
-            const freshArr = Array.from(freshCats);
+            const freshArr = extractUniqueCategories(valid);
             setAllCategories(freshArr);
             setSelectedCategories((prev) => (prev.length === 0 ? freshArr : prev));
             setCatalogStatus("success");
@@ -1246,7 +1238,7 @@ export default function FuragoApp({
 
   // Filtered articles for Home view
   const filteredArticles = articles.filter((article) => {
-    const cat = (typeof article.category === "string" ? article.category : article.category?.ja || "").trim();
+    const cat = getCategoryKey(article.category);
     if (selectedCategories.length > 0 && cat && !selectedCategories.includes(cat)) {
       return false;
     }
@@ -1271,9 +1263,7 @@ export default function FuragoApp({
     return (typeof title === "string" ? title : title?.fr) || a.originalTitle || "";
   };
   const getCategoryLabel = (a: Article): string =>
-    typeof a.category === "string" ? a.category : (a.category?.[appLang] || a.category?.ja || "");
-  const getCategoryKey = (a: Article): string =>
-    (typeof a.category === "string" ? a.category : a.category?.ja || "").trim();
+    resolveCategoryLabel(a.category, appLang);
 
   const levelProgress = getLevelProgress(totalXP, furagoLevel);
   const streakStatus = getStreakStatus(currentStreak, lastStreakDate, todayStr);
@@ -1298,7 +1288,7 @@ export default function FuragoApp({
     filteredArticles,
     completedArticleIds,
     [continueTarget?.id, dailyArticle?.id].filter((id): id is string | number => id !== undefined && id !== null),
-    getCategoryKey,
+    (article) => getCategoryKey(article.category),
     3
   );
 
@@ -2202,10 +2192,9 @@ export default function FuragoApp({
                         }}
                       >
                         {(() => {
-                          if (appLang === 'ja') return cat;
-                          const matchedArticle = articles.find(a => (typeof a.category === 'string' ? a.category : (a.category?.ja || "")).trim() === cat);
-                          return matchedArticle && typeof matchedArticle.category !== 'string' && matchedArticle.category?.[appLang] 
-                            ? matchedArticle.category[appLang] 
+                          const matchedArticle = articles.find(a => getCategoryKey(a.category) === cat);
+                          return matchedArticle
+                            ? getCategoryFilterLabel(matchedArticle.category, appLang)
                             : cat;
                         })()}
                       </button>
