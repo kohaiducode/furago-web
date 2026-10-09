@@ -6,6 +6,7 @@ import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getN
 import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
 import { checkGoalCompletion } from "../lib/progress";
 import ProgressDashboard from "./ProgressDashboard";
+import DictionaryModal from "./DictionaryModal";
 import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "../lib/analytics";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
@@ -1974,144 +1975,26 @@ export default function FuragoApp({
         />
       )}
       {/* Dictionary Floating Popup */}
-      {dictOpen && (
-        <dialog
-          ref={(node) => {
-            popupRef.current = node;
-            if (node && !node.open) {
-              node.showModal();
-            }
-          }}
-          className={`dict-popup ${arrowTop ? "arrow-top" : ""}`}
-          style={{ ...popupStyle, margin: 0 }}
-          onClose={() => setDictOpen(false)}
-          onClick={(e) => {
-            if (e.target === popupRef.current) {
-              setDictOpen(false);
-            }
-          }}
-        >
-          <div className="dict-header">
-            <div className="dict-word-container">
-              <span className="dict-word" lang="fr">
-                {dictData ? (
-                  dictData.matchedLemma &&
-                  dictData.matchedLemma.toLowerCase() !==
-                    dictData.originalWord.toLowerCase() ? (
-                    <>
-                      {dictData.originalWord}{" "}
-                      <span className="dict-lemma-hint">({dictData.mot})</span>
-                    </>
-                  ) : (
-                    dictData.originalWord
-                  )
-                ) : (
-                  "..."
-                )}
-              </span>
-              {dictData?.nature && (
-                <span className="dict-nature-tag">{dictData.nature}{dictData.gender && ` · ${dictData.gender}`}</span>
-              )}
-            </div>
-            <div className="dict-buttons">
-              <button
-                className="dict-save-btn"
-                title={t.dict.saveToList}
-                aria-label={t.dict.saveToList}
-                onClick={(e) => {
-                  if (!dictData) return;
-                  if (wordLists.length <= 1) {
-                    saveWordToList(wordLists[0]?.id || "default");
-                  } else {
-                    listSelectorTriggerRef.current = e.currentTarget;
-                    setListSelectorOpen(true);
-                  }
-                }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-              </button>
-              <button
-                className="dict-audio-btn"
-                title={t.words.listenPronunciation}
-                aria-label={t.words.listenPronunciation}
-                onClick={() => {
-                  if (dictData) speakWord(dictData.mot);
-                }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                  <path
-                    d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  ></path>
-                </svg>
-              </button>
-              <button
-                className="dict-close-btn"
-                aria-label={t.common.close}
-                title={t.common.close}
-                onClick={() => setDictOpen(false)}
-                autoFocus
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--text-muted)",
-                  cursor: "pointer",
-                  width: "44px",
-                  height: "44px",
-                  padding: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center"
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {dictLoading || !dictData ? (
-            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", padding: "4px 0" }}>
-              {t.dict.loading}
-            </div>
-          ) : (
-            <div>
-              {dictData.conciseDef && (
-                <div className="dict-def-line">{dictData.conciseDef}</div>
-              )}
-              {dictData.traductionPhrase ? (
-                <div className="dict-context-row">
-                  <span className="dict-context-label">{t.dict.context}</span>
-                  <span>{dictData.traductionPhrase}</span>
-                </div>
-              ) : (
-                !dictData.conciseDef && (
-                  <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                    {t.dict.noDef}
-                  </div>
-                )
-              )}
-            </div>
-          )}
-        </dialog>
-      )}
+      <DictionaryModal
+        appLang={appLang}
+        arrowOrientation={arrowTop ? "top" : "bottom"}
+        data={dictData}
+        dialogRef={popupRef}
+        isOpen={dictOpen}
+        loading={dictLoading}
+        onClose={() => setDictOpen(false)}
+        onSaveWord={() => {
+          if (!dictData) return;
+          if (wordLists.length <= 1) {
+            saveWordToList(wordLists[0]?.id || "default");
+          } else {
+            listSelectorTriggerRef.current = document.activeElement as HTMLButtonElement;
+            setListSelectorOpen(true);
+          }
+        }}
+        onSpeakWord={speakWord}
+        popupStyle={popupStyle}
+      />
 
       
       {/* VIEW: PROGRESS */}
