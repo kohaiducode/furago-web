@@ -17,6 +17,13 @@ export const CONTINUE_MIN_RATIO = 0.05;
 /** Key format used by UserState.articleProgress. */
 export const articleProgressKey = (id: number | string, level: string) => `${id}::${level}`;
 
+/**
+ * Normalizes one `UserState.completedArticles` entry to its article id.
+ * Entries are written as `articleId::LVL_x` so the progress engine can report a level,
+ * while legacy persisted entries are a bare `articleId`. Compare on the id part only.
+ */
+export const completedArticleId = (entry: string): string => entry.split("::")[0];
+
 /** An article is readable at a level only if that level has real text (same rule as the catalogue filter). */
 export const hasReadableLevel = (article: HomeArticleLike, level: string): boolean => {
   const lvl = article.levels?.[level];
@@ -34,7 +41,7 @@ export function selectContinueArticle<A extends HomeArticleLike>(
   articleProgress: Record<string, number>,
   lastOpenedArticleId: string
 ): { article: A; ratio: number } | null {
-  const completed = new Set(completedArticles.map(String));
+  const completed = new Set(completedArticles.map(completedArticleId));
   const candidates = articles
     .filter((a) => hasReadableLevel(a, level) && !completed.has(String(a.id)))
     .map((a) => ({ article: a, ratio: Math.min(1, Math.max(0, articleProgress[articleProgressKey(a.id, level)] ?? 0)) }))
@@ -67,7 +74,7 @@ export function selectRecommendedArticles<A extends HomeArticleLike>(
   getCategoryKey: (a: A) => string,
   limit = 3
 ): A[] {
-  const completed = new Set(completedArticles.map(String));
+  const completed = new Set(completedArticles.map(completedArticleId));
   const excluded = new Set(excludeIds.map(String));
   const pool = articles
     .filter((a) => !completed.has(String(a.id)) && !excluded.has(String(a.id)))

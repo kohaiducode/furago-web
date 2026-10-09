@@ -1,7 +1,7 @@
 "use client";
 
 import { loadUserState, updateUserState, UserState, LearnedWord, mergeLearnedVocabulary } from "../lib/userState";
-import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset, determineNextBestActionType } from "../lib/home";
+import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset, determineNextBestActionType, completedArticleId } from "../lib/home";
 import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
 import { derivePedagogicalProgress, checkGoalCompletion } from "../lib/progress";
 import ProgressDashboard from "./ProgressDashboard";
@@ -9,7 +9,7 @@ import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "..
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
 
-import { getTranslation, AppLanguage } from "@/lib/i18n";
+import { getTranslation, AppLanguage, getGoalText } from "@/lib/i18n";
 
 export interface TranslatableText {
   fr: string;
@@ -508,6 +508,8 @@ export default function FuragoApp({
     let newVocabCount = 0;
 
     const done = [...state.completedArticles];
+    // Level-aware entry ("articleId::LVL_x") so the progress engine can report the level.
+    // Legacy bare-id entries stay valid: dedupe on the article id part only.
     const progressKey = `${articleId}::${state.level}`;
     const newProgress = { ...state.articleProgress };
 
@@ -516,8 +518,8 @@ export default function FuragoApp({
       updates.articleProgress = newProgress;
     }
 
-    if (!done.includes(articleId)) {
-      done.push(articleId);
+    if (!done.some((entry) => completedArticleId(entry) === articleId)) {
+      done.push(progressKey);
       updates.completedArticles = done;
       awardedXP += 20;
 
@@ -729,7 +731,7 @@ export default function FuragoApp({
       const available = articles.filter(a => a.levels && a.levels[globalLevel]);
       if (available.length === 0) return;
       const sorted = [...available].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-      const uncompleted = sorted.filter(a => !completedArticleIds.includes(String(a.id)));
+      const uncompleted = sorted.filter(a => !completedArticleIds.some((entry) => completedArticleId(entry) === String(a.id)));
       const validPool = uncompleted.length > 0 ? uncompleted : sorted;
       const featured = validPool.filter(a => a.featured);
       const pool = featured.length > 0 ? featured : validPool;
@@ -930,7 +932,7 @@ export default function FuragoApp({
     let nextEp: Article | null = null;
     if (lastOpenedArticleId) {
       const last = articles.find(a => String(a.id) === String(lastOpenedArticleId));
-      if (last && completedArticleIds.includes(String(last.id))) {
+      if (last && completedArticleIds.some((entry) => completedArticleId(entry) === String(last.id))) {
          const info = getSeriesInfo(last, globalLevel);
          if (info?.nextEp) nextEp = info.nextEp;
       }
@@ -1814,15 +1816,15 @@ export default function FuragoApp({
     const currentIndex = validArticles.findIndex(a => a.id === article.id);
     if (currentIndex === -1) return null;
 
-    const completed = completedArticleIds || [];
+    const completed = new Set((completedArticleIds || []).map(completedArticleId));
 
     // Look forward
     for (let i = currentIndex + 1; i < validArticles.length; i++) {
-      if (!completed.includes(String(validArticles[i].id))) return validArticles[i];
+      if (!completed.has(String(validArticles[i].id))) return validArticles[i];
     }
     // Look from start
     for (let i = 0; i < currentIndex; i++) {
-      if (!completed.includes(String(validArticles[i].id))) return validArticles[i];
+      if (!completed.has(String(validArticles[i].id))) return validArticles[i];
     }
     
     // Fallback: Just next article in the filtered list
@@ -2007,8 +2009,8 @@ export default function FuragoApp({
             </span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "ストリーク" : "Streak"}</span>
-            <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "#ff9500" }}>🔥 {currentStreak} {appLang === 'ja' ? '日' : 'days'}</span>
+            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{t.progress.streak}</span>
+            <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "#ff9500" }}>🔥 {streakStatus.display} {t.progress.days}</span>
           </div>
           {sessionReward !== null && sessionReward.vocab > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
@@ -2124,12 +2126,12 @@ export default function FuragoApp({
         <section aria-labelledby="home-progress-widget" style={{ ...homeCard, padding: "16px", marginBottom: "24px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <h2 id="home-progress-widget" style={{ fontSize: "1.2rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-              {appLang === "ja" ? "マイプログレス" : "Ma Progression"}
+              {t.progress.title}
             </h2>
           </div>
           <div style={{ textAlign: "center", padding: "12px", background: "var(--bg)", borderRadius: "12px" }}>
             <span style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 600 }}>
-              {appLang === "ja" ? "最初の記事を読んで、プログレスを構築しましょう。" : "Commencez votre première lecture pour construire votre progression."}
+              {t.progress.empty}
             </span>
           </div>
         </section>
@@ -2137,19 +2139,20 @@ export default function FuragoApp({
     }
 
     const goal = progressInfo.goal;
+    const goalText = goal ? getGoalText(appLang, goal) : null;
 
     return (
       <section aria-labelledby="home-progress-widget" style={{ ...homeCard, padding: "16px", marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <h2 id="home-progress-widget" style={{ fontSize: "1.2rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-            {appLang === "ja" ? "マイプログレス" : "Ma Progression"}
+            {t.progress.title}
           </h2>
           <button 
             onClick={() => navigateTo("progress")}
             className="reset-button"
             style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--primary)", cursor: "pointer" }}
           >
-            {appLang === "ja" ? "詳細を見る" : "Voir ma progression"}
+            {t.progress.viewDetails}
           </button>
         </div>
 
@@ -2157,15 +2160,15 @@ export default function FuragoApp({
           <div style={{ background: "var(--bg)", padding: "12px", borderRadius: "12px" }}>
             <div style={{ fontSize: "1.4rem", fontWeight: 900, color: "var(--primary)" }}>{progressInfo.vocabulary.wordsConsolidated}</div>
             <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-muted)" }}>
-              {appLang === "ja" ? "定着した単語" : "Mots consolidés"}
+              {t.progress.consolidatedWords}
             </div>
           </div>
           <div style={{ background: "var(--bg)", padding: "12px", borderRadius: "12px" }}>
             <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "var(--text-main)" }}>
-              {progressInfo.reading.highestCompletedContentLevel ? (t.levels[progressInfo.reading.highestCompletedContentLevel as keyof typeof t.levels] || progressInfo.reading.highestCompletedContentLevel) : (appLang === "ja" ? "未設定" : "Non renseigné")}
+              {progressInfo.reading.highestCompletedContentLevel ? (t.levels[progressInfo.reading.highestCompletedContentLevel as keyof typeof t.levels] || progressInfo.reading.highestCompletedContentLevel) : t.progress.levelNotSet}
             </div>
             <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-muted)" }}>
-              {appLang === "ja" ? "学習中のレベル" : "Contenu travaillé"}
+              {t.progress.currentLevel}
             </div>
           </div>
         </div>
@@ -2173,10 +2176,10 @@ export default function FuragoApp({
         {goal ? (
           <div style={{ background: "linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%)", padding: "16px", borderRadius: "12px", color: "white" }}>
             <div style={{ fontSize: "0.85rem", fontWeight: 700, opacity: 0.9, marginBottom: "4px" }}>
-              {appLang === "ja" ? "現在の目標" : "Objectif actuel"}
+              {t.progress.currentGoal}
             </div>
             <div style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: "12px" }}>
-              {goal.title}
+              {goalText?.title}
             </div>
             
             <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
@@ -2195,7 +2198,7 @@ export default function FuragoApp({
                 } else if (goal.category === "READING" || goal.category === "QUIZ") {
                   let targetArticle = recommendedArticles[0];
                   if (goal.category === "QUIZ") {
-                    targetArticle = articles.find(a => !completedArticleIds.includes(String(a.id)) && a.levels[globalLevel]?.quiz && a.levels[globalLevel]?.quiz!.length > 0) || targetArticle;
+                    targetArticle = articles.find(a => !completedArticleIds.some((entry) => completedArticleId(entry) === String(a.id)) && a.levels[globalLevel]?.quiz && a.levels[globalLevel]?.quiz!.length > 0) || targetArticle;
                   }
                   if (targetArticle) {
                     openArticle(targetArticle, false, "home_progress_widget");
@@ -2208,14 +2211,14 @@ export default function FuragoApp({
               style={{ width: "100%", padding: "12px", borderRadius: "12px", background: "white", color: "var(--primary)", fontWeight: 800, border: "none", cursor: "pointer" }}
             >
               {goal.category === "VOCABULARY" || goal.category === "CONSOLIDATION" 
-                ? (appLang === "ja" ? "単語を復習する" : "Réviser mes mots")
-                : (appLang === "ja" ? "記事を読む" : "Lire un article")}
+                ? t.progress.goalCtaReview
+                : t.progress.goalCtaRead}
             </button>
           </div>
         ) : (
           <div style={{ textAlign: "center", padding: "12px", background: "var(--bg)", borderRadius: "12px" }}>
             <span style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 600 }}>
-              {appLang === "ja" ? "学習を続けてプログレスを構築しましょう。" : "Continuez à apprendre pour construire votre progression."}
+              {t.progress.goalEmpty}
             </span>
           </div>
         )}
@@ -2256,7 +2259,7 @@ export default function FuragoApp({
               value={leadEmail}
               onChange={(e) => setLeadEmail(e.target.value)}
               placeholder="e.g. taro@furago.com"
-              aria-label="Adresse email"
+              aria-label={t.common.email}
               className="lead-bar-input"
               style={{ padding: '6px 12px', borderRadius: '16px', border: 'none', outline: 'none', fontSize: '0.85rem' }}
             />
@@ -2266,7 +2269,7 @@ export default function FuragoApp({
             <button
               type="button"
               onClick={() => setShowLeadBar(false)}
-              aria-label="Close"
+              aria-label={t.common.close}
               style={{
                 background: "transparent",
                 border: "none",
@@ -2294,7 +2297,7 @@ export default function FuragoApp({
                 setDictOpen(false);
                 handleBack("home");
               }}
-              aria-label="Back"
+              aria-label={t.common.back}
             >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="15 18 9 12 15 6"></polyline>
@@ -2305,19 +2308,19 @@ export default function FuragoApp({
         </div>
 
         <div className="header-right">
-          {(currentStreak > 0 || totalXP > 0) && (
+          {(streakStatus.display > 0 || totalXP > 0) && (
             <div className="header-stats-compact">
-              {currentStreak > 0 && (
-                <div className="stat-item" title={appLang === 'ja' ? 'ストリーク' : 'Streak'}>
+              {streakStatus.display > 0 && (
+                <div className="stat-item" title={t.progress.streak}>
                   <span className="stat-icon">🔥</span>
-                  <span className="stat-val">{currentStreak}</span>
-                  <span className="stat-label desktop-only">&nbsp;{appLang === 'ja' ? '日' : 'days'}</span>
+                  <span className="stat-val">{streakStatus.display}</span>
+                  <span className="stat-label desktop-only">&nbsp;{t.progress.days}</span>
                 </div>
               )}
               {totalXP > 0 && (
                 <div className="stat-item" title={appLang === 'ja' ? 'XPとレベル' : 'Level & XP'}>
                   <span className="stat-icon" style={{color: 'var(--primary)'}}>★</span>
-                  <span className="stat-label desktop-only">Level&nbsp;</span>
+                  <span className="stat-label desktop-only">{t.nav.level}&nbsp;</span>
                   <span className="stat-val">{Math.floor(totalXP / 100) + 1}</span>
                   <span className="stat-xp"><span className="desktop-only">&nbsp;(</span><span className="mobile-only">&nbsp;</span>{totalXP}<span className="desktop-only">&nbsp;XP)</span><span className="mobile-only">XP</span></span>
                 </div>
@@ -2521,9 +2524,7 @@ export default function FuragoApp({
             {continueTarget && (
               <section aria-labelledby="home-continue">
                 <h2 id="home-continue" style={homeSectionLabel}>
-                  {continueArticle
-                    ? (appLang === 'ja' ? '続きから' : 'Continue')
-                    : (appLang === 'ja' ? 'シリーズの続き' : 'Continue the series')}
+                  {continueArticle ? t.home.continueTitle : t.home.continueSeriesTitle}
                 </h2>
                 <div style={homeCard}>
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'center', minWidth: 0 }}>
@@ -2538,7 +2539,7 @@ export default function FuragoApp({
                         {[
                           t.levels[globalLevel as keyof typeof t.levels],
                           getCategoryLabel(continueTarget),
-                          !continueArticle && continueTarget.seriesOrder ? `Episode ${continueTarget.seriesOrder}` : '',
+                          !continueArticle && continueTarget.seriesOrder ? t.home.episode.replace("{n}", String(continueTarget.seriesOrder)) : '',
                         ].filter(Boolean).join(' · ')}
                       </p>
                     </div>
@@ -2547,7 +2548,7 @@ export default function FuragoApp({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px' }}>
                       <div
                         role="progressbar"
-                        aria-label={appLang === 'ja' ? '読了率' : 'Reading progress'}
+                        aria-label={t.home.readingProgress}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={continuePercent}
@@ -2562,16 +2563,14 @@ export default function FuragoApp({
                   )}
                   {missionIsContinue && !isMissionCompletedToday && (
                     <p style={{ ...homeMeta, color: 'var(--primary)', fontWeight: 700, marginTop: '10px' }}>
-                      {appLang === 'ja' ? '🎯 今日のミッション対象の記事です' : "🎯 This is today's mission"}
+                      {t.home.missionTag}
                     </p>
                   )}
                   <button onClick={() => {
                     trackEvent("home_cta_clicked", { cta_type: "continue", position: 1 });
                     openArticle(continueTarget, false, "home_continue");
                   }} style={{ ...homeCta(nextBestActionType === 'continue'), marginTop: '12px' }}>
-                    {continueArticle
-                      ? (appLang === 'ja' ? '続きを読む' : 'Continue reading')
-                      : (appLang === 'ja' ? '次のエピソードへ' : 'Next episode')}
+                    {continueArticle ? t.home.continueCta : t.home.nextEpisodeCta}
                   </button>
                 </div>
               </section>
@@ -2579,14 +2578,14 @@ export default function FuragoApp({
 
             {/* C. À RÉVISER — count comes from getWordsDueForReview (real SRS) */}
             <section aria-labelledby="home-review">
-              <h2 id="home-review" style={homeSectionLabel}>{appLang === 'ja' ? '復習' : 'To review'}</h2>
+              <h2 id="home-review" style={homeSectionLabel}>{t.home.reviewSection}</h2>
               {dueReviewCount > 0 ? (
                 <div style={{ ...homeCard, display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                   <div style={{ flex: '1 1 150px', minWidth: 0 }}>
                     <p style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                      {appLang === 'ja' ? `${dueReviewCount}語が復習待ち` : `${dueReviewCount} ${dueReviewCount === 1 ? 'word' : 'words'} due`}
+                      {(dueReviewCount === 1 ? t.home.reviewDueOne : t.home.reviewDue).replace("{count}", String(dueReviewCount))}
                     </p>
-                    <p style={homeMeta}>{appLang === 'ja' ? '忘れる前に確認しよう' : 'Review them before you forget'}</p>
+                    <p style={homeMeta}>{t.home.reviewBeforeForget}</p>
                   </div>
                   <button
                     onClick={() => {
@@ -2595,20 +2594,20 @@ export default function FuragoApp({
                     }}
                     style={{ ...homeCta(nextBestActionType === 'review'), width: 'auto', flex: '0 0 auto', padding: '12px 22px' }}
                   >
-                    {appLang === 'ja' ? '復習する' : 'Review'}
+                    {t.home.reviewCta}
                   </button>
                 </div>
               ) : (
                 <p style={homeCompactLine}>
                   {learnedWords.length === 0
-                    ? (appLang === 'ja' ? '記事を読み終えると、ここに復習する単語が追加されます' : 'Finish an article to add words to review')
+                    ? t.home.reviewEmptyNoWords
                     : nextReviewOffset === 0
-                      ? (appLang === 'ja' ? '✅ 今は復習なし · 次は今日中' : '✅ Nothing due now · next review later today')
+                      ? t.home.reviewNoneLaterToday
                       : nextReviewOffset === 1
-                        ? (appLang === 'ja' ? '✅ 復習完了 · 次は明日' : '✅ All caught up · next review tomorrow')
+                        ? t.home.reviewNoneTomorrow
                         : nextReviewOffset !== null
-                          ? (appLang === 'ja' ? `✅ 復習完了 · 次は${nextReviewOffset}日後` : `✅ All caught up · next review in ${nextReviewOffset} days`)
-                          : (appLang === 'ja' ? '✅ 復習完了' : '✅ All caught up')}
+                          ? t.home.reviewNoneInDays.replace("{days}", String(nextReviewOffset))
+                          : t.home.reviewNone}
                 </p>
               )}
               {savedWords.length > 0 && (
@@ -2620,7 +2619,7 @@ export default function FuragoApp({
                   }}
                   style={{ background: 'none', border: 'none', padding: '8px 2px', minHeight: '44px', color: 'var(--primary)', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer', textAlign: 'left' }}
                 >
-                  {appLang === 'ja' ? `保存した単語を練習する（${savedWords.length}）` : `Practice my saved words (${savedWords.length})`}
+                  {t.home.practiceSaved.replace("{count}", String(savedWords.length))}
                 </button>
               )}
             </section>
@@ -2628,14 +2627,14 @@ export default function FuragoApp({
             {/* D. MISSION DU JOUR — existing daily mission (dailyArticle + dailyMissionCompletedDate) */}
             {dailyArticle && (
               <section aria-labelledby="home-mission">
-                <h2 id="home-mission" style={homeSectionLabel}>{appLang === 'ja' ? '今日のミッション' : "Today's mission"}</h2>
+                <h2 id="home-mission" style={homeSectionLabel}>{t.home.missionSection}</h2>
                 {isMissionCompletedToday ? (
                   <p style={{ ...homeCompactLine, color: '#2e7d32', background: 'var(--green-light)', borderColor: 'transparent' }}>
-                    {appLang === 'ja' ? '✅ ミッション完了！明日また新しいミッションが届きます' : '✅ Mission complete! A new one arrives tomorrow'}
+                    {t.home.missionComplete}
                   </p>
                 ) : missionIsContinue ? (
                   <p style={homeCompactLine}>
-                    {appLang === 'ja' ? '🎯 読みかけの記事を最後まで読もう（上の「続きを読む」）' : '🎯 Finish the article you started (above)'}
+                    {t.home.missionContinueHint}
                   </p>
                 ) : (
                   <div style={homeCard}>
@@ -2647,10 +2646,10 @@ export default function FuragoApp({
                       )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ margin: '0 0 4px', fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary)' }}>
-                          {appLang === 'ja' ? '🎯 この記事を読み終えよう' : '🎯 Finish this article'}
+                          {t.home.missionFinish}
                         </p>
                         <h3 lang="fr" style={homeTitle}>{getArticleTitle(dailyArticle)}</h3>
-                        <p style={homeMeta}>{appLang === 'ja' ? 'ボーナスXP · ストリーク継続' : 'Bonus XP · keeps your streak'}</p>
+                        <p style={homeMeta}>{t.home.missionMeta}</p>
                       </div>
                     </div>
                     <button onClick={() => {
@@ -2671,7 +2670,7 @@ export default function FuragoApp({
 {/* E. RECOMMANDÉ — not completed, newest first, one per category first */}
             {recommendedArticles.length > 0 && (
               <section aria-labelledby="home-reco">
-                <h2 id="home-reco" style={homeSectionLabel}>{appLang === 'ja' ? 'あなたへのおすすめ' : 'Recommended for you'}</h2>
+                <h2 id="home-reco" style={homeSectionLabel}>{t.home.recommended}</h2>
                 <ul style={{ ...homeCard, listStyle: 'none', margin: 0, padding: '2px 12px' }}>
                   {recommendedArticles.map((a, i) => (
                     <li key={a.id}>
@@ -2701,29 +2700,29 @@ export default function FuragoApp({
             )}
 
             <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)', margin: '28px 0 12px' }}>
-              {appLang === 'ja' ? 'すべての記事' : 'All articles'}
+              {t.home.allArticles}
             </h2>
           </div>
 
           {catalogStatus === "loading" ? (
             <p style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-muted)" }}>
-              {appLang === "ja" ? "読み込み中..." : "Loading..."}
+              {t.home.loading}
             </p>
           ) : catalogStatus === "error" ? (
             <div style={{ textAlign: "center", padding: "40px 20px" }}>
               <p style={{ color: "var(--text-muted)", marginBottom: "16px" }}>
-                {appLang === "ja" ? "記事を読み込めませんでした。ネットワーク接続を確認してください。" : "Could not load articles. Please check your network connection."}
+                {t.home.loadError}
               </p>
               <button 
                 onClick={() => window.location.reload()}
                 style={{ padding: "10px 20px", background: "var(--primary)", color: "white", borderRadius: "10px", border: "none", fontWeight: "bold", cursor: "pointer" }}
               >
-                {appLang === "ja" ? "再試行" : "Retry"}
+                {t.home.retry}
               </button>
             </div>
           ) : filteredArticles.length === 0 ? (
             <p style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-muted)" }}>
-              {appLang === "ja" ? "条件に一致する記事は見つかりませんでした。" : "No articles found matching the criteria."}
+              {t.home.emptyResult}
             </p>
           ) : (
             <ul className="article-list">
@@ -2732,7 +2731,7 @@ export default function FuragoApp({
                 const displayTitle = levelData?.title || article.originalTitle;
                 const imgUrl = formatDriveUrl(article.imageUrl);
                 const dateFormatted = article.date
-                  ? new Date(article.date).toLocaleDateString("ja-JP")
+                  ? new Date(article.date).toLocaleDateString(appLang === "ja" ? "ja-JP" : "en-US")
                   : "";
 
                 return (
@@ -4111,8 +4110,8 @@ export default function FuragoApp({
               </button>
               <button
                 className="dict-close-btn"
-                aria-label="Fermer"
-                title="Fermer"
+                aria-label={t.common.close}
+                title={t.common.close}
                 onClick={() => setDictOpen(false)}
                 autoFocus
                 style={{
@@ -4448,7 +4447,7 @@ export default function FuragoApp({
             >
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
-            {appLang === "ja" ? "プログレス" : "Progression"}
+            {t.nav.progress}
           </button>
         </nav>
 
@@ -4481,7 +4480,7 @@ export default function FuragoApp({
               <button
                 type="button"
                 onClick={() => setFilterModalType(null)}
-                aria-label="Fermer"
+                aria-label={t.common.close}
                 style={{
                   position: "absolute",
                   top: "-15px",
@@ -4788,7 +4787,7 @@ export default function FuragoApp({
               </h3>
               <button
                 type="button"
-                aria-label="Fermer"
+                aria-label={t.common.close}
                 onClick={() => setLeadModalOpen(false)}
                 style={{
                   background: "var(--bg)",

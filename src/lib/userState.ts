@@ -39,7 +39,7 @@ export interface UserState {
   savedVocabulary: SavedWord[];
   learnedVocabulary: LearnedWord[]; // auto-learned from completed articles; never mixed with savedVocabulary
   wordLists: WordList[];
-  completedArticles: string[]; // previously furago_xp_articles
+  completedArticles: string[]; // "articleId" (legacy) or "articleId::LVL_x"; previously furago_xp_articles
   quizResults: string[]; // previously furago_xp_quizzes
   perfectQuizResults: string[]; // previously furago_xp_perfects
   currentStreak: number;

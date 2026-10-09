@@ -93,8 +93,8 @@ describe("Navigation and Post-SRS Integration", () => {
       id: "art-1",
     });
 
-    // 3. Click back button in reading header
-    const backBtn = screen.getByLabelText("Back");
+    // 3. Click back button in reading header (localized accessibility label)
+    const backBtn = screen.getByLabelText(/^(戻る|Back)$/);
     await act(async () => {
       fireEvent.click(backBtn);
     });

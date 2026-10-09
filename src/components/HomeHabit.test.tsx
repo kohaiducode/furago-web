@@ -181,4 +181,34 @@ describe("Home Habit Layer (6.3-B)", () => {
       expect.objectContaining({ streak_state: "at_risk" })
     );
   });
+
+  it("HABIT-10: broken streak — the header never shows the stale stored streak while Home reports broken.", () => {
+    const state = getEmptyUserState();
+    state.currentStreak = 4;
+    state.lastStreakDate = ymd(-3);
+    state.xp = 50; // header stats render, but the streak tile must be gone
+    const { container } = renderHome(state);
+
+    const nudge = container.querySelector('[data-testid="habit-nudge"]');
+    expect(nudge!.getAttribute("data-state")).toBe("broken");
+
+    const headerValues = Array.from(
+      container.querySelectorAll(".header-stats-compact .stat-val")
+    ).map((el) => el.textContent);
+    expect(headerValues).not.toContain("4");
+  });
+
+  it("HABIT-11: at-risk streak — header and Home present the same number.", () => {
+    const state = getEmptyUserState();
+    state.currentStreak = 5;
+    state.lastStreakDate = ymd(-1);
+    const { container } = renderHome(state);
+
+    const nudge = container.querySelector('[data-testid="habit-nudge"]');
+    expect(nudge!.getAttribute("data-state")).toBe("at_risk");
+    expect(nudge!.textContent).toContain("5日連続");
+
+    const headerStreak = container.querySelector(".header-stats-compact .stat-val");
+    expect(headerStreak?.textContent).toBe("5");
+  });
 });

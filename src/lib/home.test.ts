@@ -3,6 +3,7 @@ import {
   selectContinueArticle,
   selectRecommendedArticles,
   articleProgressKey,
+  completedArticleId,
   HomeArticleLike,
   determineNextBestActionType
 } from "./home";
@@ -174,6 +175,35 @@ describe("home module", () => {
 
       expect(recommended).toHaveLength(3);
       expect(recommended.map((a) => a.id)).toEqual(["1", "2", "3"]);
+    });
+  });
+
+  describe("HOME-03: completedArticles entry formats", () => {
+    it("HOME-03-01: normalizes legacy bare ids and level-aware ids to the article id", () => {
+      expect(completedArticleId("12")).toBe("12");
+      expect(completedArticleId("12::LVL_2")).toBe("12");
+      expect(completedArticleId("art-1::LVL_4")).toBe("art-1");
+    });
+
+    it("HOME-03-02: a level-aware completed entry still excludes the article from Continue", () => {
+      const articles = [createArticle("1", "News")];
+      const progress = { [articleProgressKey("1", "LVL_1")]: 0.5 };
+
+      const result = selectContinueArticle(articles, "LVL_1", ["1::LVL_1"], progress, "");
+      expect(result).toBeNull();
+    });
+
+    it("HOME-03-03: a level-aware completed entry still excludes the article from Recommendations", () => {
+      const articles = [createArticle("1", "News"), createArticle("2", "News")];
+
+      const recommended = selectRecommendedArticles(
+        articles,
+        ["1::LVL_1"],
+        [],
+        (a) => a.category,
+        3
+      );
+      expect(recommended.map((a) => a.id)).toEqual(["2"]);
     });
   });
 });

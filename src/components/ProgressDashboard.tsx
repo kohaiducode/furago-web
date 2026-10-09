@@ -3,7 +3,8 @@
 import React, { useMemo, useEffect, useRef, useCallback } from "react";
 import { UserState } from "@/lib/userState";
 import { derivePedagogicalProgress } from "@/lib/progress";
-import { getTranslation, AppLanguage } from "@/lib/i18n";
+import { getTranslation, AppLanguage, getGoalText, getCanDoText } from "@/lib/i18n";
+import { getStreakStatus } from "@/lib/home";
 import { trackEvent } from "@/lib/analytics";
 
 export interface ProgressDashboardProps {
@@ -17,6 +18,13 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
   const progress = useMemo(() => derivePedagogicalProgress(userState), [userState]);
 
   const { vocabulary, reading, consistency, goal, canDos } = progress;
+  const goalText = goal ? getGoalText(appLang, goal) : null;
+  // Same display logic as the header/Home habit layer: a stale stored streak is never shown as current.
+  const streakStatus = getStreakStatus(
+    userState.currentStreak,
+    userState.lastStreakDate,
+    new Date().toLocaleDateString("en-CA")
+  );
 
   const dashboardOpenedRef = useRef(false);
   const candoViewedRef = useRef(false);
@@ -74,12 +82,10 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
     <div className="view fade-in progress-dashboard" style={{ padding: "16px", paddingBottom: "100px" }}>
       <header style={{ marginBottom: "24px" }}>
         <h2 style={{ fontSize: "1.5rem", fontWeight: 800, margin: "0 0 8px 0" }}>
-          {appLang === "ja" ? "マイプログレス" : "My Progress"}
+          {t.progress.title}
         </h2>
         <p style={{ color: "var(--text-muted)", margin: 0, fontSize: "0.95rem" }}>
-          {appLang === "ja" 
-            ? "これまでの学習の記録です。" 
-            : "Here is what you have worked on so far."}
+          {t.progress.subtitle}
         </p>
       </header>
 
@@ -88,13 +94,13 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
         <div className="card" style={{ padding: "16px", borderRadius: "16px", background: "var(--surface)", border: "1px solid var(--border)", textAlign: "center" }}>
           <div style={{ fontSize: "2rem", fontWeight: 900, color: "var(--primary)" }}>{reading.completedArticles}</div>
           <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 600 }}>
-            {appLang === "ja" ? "読んだ記事" : "Articles Read"}
+            {t.progress.articlesRead}
           </div>
         </div>
         <div className="card" style={{ padding: "16px", borderRadius: "16px", background: "var(--surface)", border: "1px solid var(--border)", textAlign: "center" }}>
           <div style={{ fontSize: "2rem", fontWeight: 900, color: "var(--success)" }}>{vocabulary.wordsConsolidated}</div>
           <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 600 }}>
-            {appLang === "ja" ? "定着した単語" : "Consolidated Words"}
+            {t.progress.consolidatedWords}
           </div>
         </div>
       </section>
@@ -103,11 +109,11 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
       {goal && (
         <section style={{ marginBottom: "24px" }}>
           <h3 style={{ fontSize: "1.1rem", fontWeight: 800, marginBottom: "12px" }}>
-            {appLang === "ja" ? "現在の目標" : "Current Goal"}
+            {t.progress.currentGoal}
           </h3>
           <div style={{ padding: "16px", borderRadius: "16px", background: "linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%)", color: "white" }}>
-            <h4 style={{ margin: "0 0 8px 0", fontSize: "1.1rem" }}>{goal.title}</h4>
-            <p style={{ margin: "0 0 16px 0", fontSize: "0.9rem", opacity: 0.9 }}>{goal.description}</p>
+            <h4 style={{ margin: "0 0 8px 0", fontSize: "1.1rem" }}>{goalText?.title}</h4>
+            <p style={{ margin: "0 0 16px 0", fontSize: "0.9rem", opacity: 0.9 }}>{goalText?.description}</p>
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <div style={{ flex: 1, background: "rgba(255,255,255,0.3)", height: "8px", borderRadius: "4px", overflow: "hidden" }}>
                 <div style={{ background: "white", width: `${goal.progressRatio * 100}%`, height: "100%", borderRadius: "4px" }} />
@@ -119,7 +125,7 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
               onClick={() => handleGoalClick(goal.category)}
               style={{ marginTop: "16px", width: "100%", padding: "10px", borderRadius: "12px", background: "white", color: "var(--primary)", fontWeight: 800, border: "none" }}
             >
-              {appLang === "ja" ? "学習を続ける" : "Continue Learning"}
+              {t.progress.continueLearning}
             </button>
           </div>
         </section>
@@ -128,18 +134,18 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
       {/* SECTION 2: VOCABULARY */}
       <section style={{ marginBottom: "24px" }}>
         <h3 style={{ fontSize: "1.1rem", fontWeight: 800, marginBottom: "12px" }}>
-          {appLang === "ja" ? "語彙の習得状況" : "Vocabulary Progress"}
+          {t.progress.vocabulary}
         </h3>
         <div style={{ padding: "16px", borderRadius: "16px", background: "var(--surface)", border: "1px solid var(--border)" }}>
           {vocabulary.wordsEncountered === 0 ? (
             <p style={{ color: "var(--text-muted)", margin: 0, fontSize: "0.9rem" }}>
-              {appLang === "ja" ? "まだ学習した単語がありません。記事を読んで単語を追加しましょう。" : "You haven't encountered any words yet. Read articles to find new words!"}
+              {t.progress.vocabularyEmpty}
             </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <VocabRow label={appLang === "ja" ? "学習中" : "In Study"} count={vocabulary.wordsInStudy} total={vocabulary.wordsEncountered} color="var(--primary)" />
-              <VocabRow label={appLang === "ja" ? "定着中" : "Consolidating"} count={vocabulary.wordsConsolidating} total={vocabulary.wordsEncountered} color="var(--accent)" />
-              <VocabRow label={appLang === "ja" ? "定着済み" : "Consolidated"} count={vocabulary.wordsConsolidated} total={vocabulary.wordsEncountered} color="var(--success)" />
+              <VocabRow label={t.progress.inStudy} count={vocabulary.wordsInStudy} total={vocabulary.wordsEncountered} color="var(--primary)" />
+              <VocabRow label={t.progress.consolidating} count={vocabulary.wordsConsolidating} total={vocabulary.wordsEncountered} color="var(--accent)" />
+              <VocabRow label={t.progress.consolidated} count={vocabulary.wordsConsolidated} total={vocabulary.wordsEncountered} color="var(--success)" />
             </div>
           )}
         </div>
@@ -148,22 +154,22 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
       {/* SECTION 3: READING */}
       <section style={{ marginBottom: "24px" }}>
         <h3 style={{ fontSize: "1.1rem", fontWeight: 800, marginBottom: "12px" }}>
-          {appLang === "ja" ? "読解の記録" : "Reading Log"}
+          {t.progress.readingLog}
         </h3>
         <div style={{ padding: "16px", borderRadius: "16px", background: "var(--surface)", border: "1px solid var(--border)" }}>
           {reading.completedArticles === 0 ? (
             <p style={{ color: "var(--text-muted)", margin: 0, fontSize: "0.9rem" }}>
-              {appLang === "ja" ? "最初の記事を読み終えると、ここに記録が表示されます。" : "Finish your first article to see your reading log here."}
+              {t.progress.readingLogEmpty}
             </p>
           ) : (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid var(--border)" }}>
-                <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>{appLang === "ja" ? "クイズ満点" : "Perfect Quizzes"}</span>
+                <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>{t.progress.perfectQuizzes}</span>
                 <span style={{ fontWeight: 800 }}>{reading.perfectQuizResults}</span>
               </div>
               <div>
                 <span style={{ color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: "8px" }}>
-                  {appLang === "ja" ? "レベル別クリア数" : "Completed by Level"}
+                  {t.progress.completedByLevel}
                 </span>
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                   {Object.entries(reading.completedByLevel).map(([lvl, count]) => {
@@ -184,7 +190,7 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
                     if (unknownCount > 0) {
                       return (
                         <div style={{ background: "var(--bg-main)", padding: "6px 12px", borderRadius: "20px", fontSize: "0.85rem", fontWeight: 600, border: "1px solid var(--border)" }}>
-                          {appLang === "ja" ? "レベル未設定" : "Unknown Level"}: {unknownCount}
+                          {t.progress.unknownLevel}: {unknownCount}
                         </div>
                       );
                     }
@@ -200,18 +206,18 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
       {/* SECTION 6: CONSISTENCY */}
       <section style={{ marginBottom: "24px" }}>
         <h3 style={{ fontSize: "1.1rem", fontWeight: 800, marginBottom: "12px" }}>
-          {appLang === "ja" ? "学習の習慣" : "Learning Habit"}
+          {t.progress.learningHabit}
         </h3>
         <div style={{ display: "flex", gap: "12px" }}>
           <div style={{ flex: 1, padding: "16px", borderRadius: "16px", background: "var(--surface)", border: "1px solid var(--border)", textAlign: "center" }}>
             <div style={{ fontSize: "1.8rem", margin: "0 0 4px 0" }}>🔥</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: 900 }}>{consistency.currentStreak} {appLang === "ja" ? "日" : "days"}</div>
-            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{appLang === "ja" ? "連続学習" : "Current Streak"}</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 900 }}>{streakStatus.display} {t.progress.days}</div>
+            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{t.progress.currentStreak}</div>
           </div>
           <div style={{ flex: 1, padding: "16px", borderRadius: "16px", background: "var(--surface)", border: "1px solid var(--border)", textAlign: "center" }}>
             <div style={{ fontSize: "1.8rem", margin: "0 0 4px 0" }}>🏆</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: 900 }}>{consistency.longestStreak} {appLang === "ja" ? "日" : "days"}</div>
-            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{appLang === "ja" ? "最長記録" : "Best Streak"}</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 900 }}>{consistency.longestStreak} {t.progress.days}</div>
+            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{t.progress.bestStreak}</div>
           </div>
         </div>
       </section>
@@ -219,7 +225,7 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
       {/* SECTION 4: CAN-DO SKILLS */}
       <section ref={candoSectionRef} style={{ marginBottom: "24px" }}>
         <h3 style={{ fontSize: "1.1rem", fontWeight: 800, marginBottom: "12px" }}>
-          {appLang === "ja" ? "できること (Can-Do)" : "My Skills (Can-Do)"}
+          {t.progress.canDo}
         </h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           {canDos.map(skill => (
@@ -252,10 +258,10 @@ export default function ProgressDashboard({ userState, appLang, onGoalClick }: P
               </div>
               <div>
                 <div style={{ fontWeight: 800, fontSize: "0.95rem", marginBottom: "4px", color: skill.isUnlocked ? "var(--text-main)" : "var(--text-muted)" }}>
-                  {skill.title}
+                  {getCanDoText(appLang, skill).title}
                 </div>
                 <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                  {skill.criteriaDescription}
+                  {getCanDoText(appLang, skill).criteria}
                 </div>
               </div>
             </div>

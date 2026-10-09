@@ -174,8 +174,8 @@ export const deriveCurrentPedagogicalGoal = (
   if (vocab.wordsConsolidated < 10) {
     return {
       id: "GOAL_VOCAB_START",
-      title: "Consolider le vocabulaire",
-      description: "Consolidez 10 mots pour construire une base solide.",
+      title: "Build a vocabulary foundation",
+      description: "Consolidate 10 words to build a solid base.",
       current: vocab.wordsConsolidated,
       target: 10,
       progressRatio: Math.min(1, vocab.wordsConsolidated / 10),
@@ -186,8 +186,8 @@ export const deriveCurrentPedagogicalGoal = (
   if (reading.completedArticles < 3) {
     return {
       id: "GOAL_READ_MORE",
-      title: "Pratique de la lecture",
-      description: "Terminez 3 articles pour vous habituer à la lecture.",
+      title: "Reading practice",
+      description: "Finish 3 articles to get comfortable reading.",
       current: reading.completedArticles,
       target: 3,
       progressRatio: Math.min(1, reading.completedArticles / 3),
@@ -198,8 +198,8 @@ export const deriveCurrentPedagogicalGoal = (
   if (reading.perfectQuizResults < 2) {
     return {
       id: "GOAL_QUIZ_PERFECT",
-      title: "Compréhension précise",
-      description: "Obtenez 2 scores parfaits aux quiz pour prouver votre compréhension.",
+      title: "Precise comprehension",
+      description: "Get 2 perfect quiz scores to prove your understanding.",
       current: reading.perfectQuizResults,
       target: 2,
       progressRatio: Math.min(1, reading.perfectQuizResults / 2),
@@ -210,8 +210,8 @@ export const deriveCurrentPedagogicalGoal = (
   const nextTarget = Math.ceil((vocab.wordsConsolidated + 1) / 20) * 20;
   return {
     id: "GOAL_CONSOLIDATE_MORE",
-    title: "Enrichissement du vocabulaire",
-    description: `Atteignez ${nextTarget} mots consolidés.`,
+    title: "Expand your vocabulary",
+    description: `Reach ${nextTarget} consolidated words.`,
     current: vocab.wordsConsolidated,
     target: nextTarget,
     progressRatio: Math.min(1, vocab.wordsConsolidated / nextTarget),
@@ -229,38 +229,38 @@ export const deriveCanDos = (
   const cando: CanDoSkill[] = [
     {
       id: "CAN-DO-READ-01",
-      title: "Je peux comprendre l'idée générale de textes courts.",
+      title: "I can understand the general idea of short texts.",
       category: "LEARNING_SKILLS",
       isUnlocked: reading.completedArticles >= 5,
-      criteriaDescription: "Nécessite 5 articles terminés.",
+      criteriaDescription: "Requires 5 completed articles.",
     },
     {
       id: "CAN-DO-READ-02",
-      title: "Je peux retrouver des informations précises dans un texte.",
+      title: "I can find specific information in a text.",
       category: "LEARNING_SKILLS",
       isUnlocked: reading.perfectQuizResults >= 3,
-      criteriaDescription: "Nécessite 3 quiz parfaits.",
+      criteriaDescription: "Requires 3 perfect quizzes.",
     },
     {
       id: "CAN-DO-VOCAB-01",
-      title: "Je reconnais et consolide le vocabulaire fréquent rencontré dans mes lectures.",
+      title: "I recognize and consolidate frequent vocabulary from my reading.",
       category: "LEARNING_SKILLS",
       isUnlocked: vocab.wordsConsolidated >= 20,
-      criteriaDescription: "Nécessite 20 mots consolidés.",
+      criteriaDescription: "Requires 20 consolidated words.",
     },
     {
       id: "CAN-DO-CONTENT-01",
-      title: "Je peux lire et comprendre des textes de niveau intermédiaire.",
+      title: "I can read and understand intermediate-level texts.",
       category: "LEARNING_SKILLS",
       isUnlocked: (reading.highestCompletedContentLevel ? (LEVEL_WEIGHTS[reading.highestCompletedContentLevel] || 0) >= LEVEL_WEIGHTS["LVL_2"] : false) && reading.completedArticles > 0,
-      criteriaDescription: "Nécessite d'avoir terminé au moins un article de niveau 2 ou supérieur.",
+      criteriaDescription: "Requires at least one completed level 2 (or higher) article.",
     },
     {
       id: "CAN-DO-HABIT-01",
-      title: "Je peux travailler régulièrement sur des contenus élémentaires.",
+      title: "I can study elementary content regularly.",
       category: "HABIT",
       isUnlocked: consistency.longestStreak >= 3,
-      criteriaDescription: "Nécessite une série de 3 jours.",
+      criteriaDescription: "Requires a 3-day streak.",
     },
   ];
 
