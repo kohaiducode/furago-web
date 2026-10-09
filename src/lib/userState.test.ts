@@ -31,6 +31,30 @@ describe("userState module", () => {
     expect(state.articleProgress).toEqual({});
   });
 
+  it("STATE-04: loading a saved state preserves user data and its daily mission target", () => {
+    const saved = loadUserState();
+    saved.xp = 137;
+    saved.savedVocabulary = [
+      { fr: "bonjour", ja: "こんにちは", listId: "default", date: "2026-10-09" },
+    ];
+    saved.completedArticles = ["article-7::LVL_2"];
+    saved.dailyMissionTarget = {
+      date: "2026-10-09",
+      articleId: "article-8",
+      level: "LVL_2",
+    };
+    saved.articleProgress = { "article-7::LVL_2": 0.6 };
+    localStorage.setItem("furago:user-state:v1", JSON.stringify(saved));
+
+    const restored = loadUserState();
+
+    expect(restored.xp).toBe(137);
+    expect(restored.savedVocabulary).toEqual(saved.savedVocabulary);
+    expect(restored.completedArticles).toEqual(saved.completedArticles);
+    expect(restored.dailyMissionTarget).toEqual(saved.dailyMissionTarget);
+    expect(restored.articleProgress).toEqual(saved.articleProgress);
+  });
+
   // STATE-02: Legacy migration works for xp, level, words, and CEFR levels (A1/A2/B1/B2/C1)
   it("STATE-02: Legacy migration converts CEFR levels to LVL_X and restores legacy fields", () => {
     const testCases: Array<{ legacyLevel: string; expectedLevel: string }> = [
