@@ -13,21 +13,48 @@ import HomeView from "@/features/home/HomeView";
 import ReadingView from "@/features/reading/ReadingView";
 import VocabReviewView, { type VocabReviewAction } from "@/features/vocab-review/VocabReviewView";
 import WordbookView from "@/features/wordbook/WordbookView";
-import type { Article, Paragraph } from "@/types/article";
+import type { Article } from "@/types/article";
+import useSpeechSynthesis from "../hooks/useSpeechSynthesis";
 
 import { getTranslation, AppLanguage } from "@/lib/i18n";
-
-interface TtsQueueItem {
-  text: string;
-  start: number;
-  length: number;
-}
 
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
 const LEVELS = ["LVL_1", "LVL_2", "LVL_3", "LVL_4"];
 // Reserved id for the read-only system list "📚 Furago — Mots appris".
 // Never part of wordLists, so it cannot be renamed, deleted, or used as a save target.
 const LEARNED_LIST_ID = "__furago_learned__";
+
+const getSpeechContent = (levelData: Article["levels"][string]) => {
+  const paragraphs = levelData.paragraphs || levelData.segments || [];
+  return {
+    text: levelData.content || paragraphs.map((paragraph) => paragraph.fr).join("\n"),
+    paragraphs: paragraphs.map((paragraph) => paragraph.fr),
+  };
+};
+
+const getSpeechVoiceOptions = (voices: SpeechSynthesisVoice[]) => {
+  const femaleNames = ["Sophie", "Camille", "Léa", "Alice", "Emma"];
+  const maleNames = ["Thomas", "Lucas", "Hugo", "Paul", "Arthur"];
+  let femaleIndex = 0;
+  let maleIndex = 0;
+
+  return voices.map((voice, index) => {
+    const id = (voice.voiceURI || voice.name || "").toLowerCase();
+    let isFemale: boolean;
+    if (/vlf|vld|vla|fra|frc|female|femme|hortense|julie|eloise|denise/i.test(id)) {
+      isFemale = true;
+    } else if (/vle|vlc|vlb|frb|frd|male|homme|paul|henri|thomas/i.test(id)) {
+      isFemale = false;
+    } else {
+      isFemale = index === 0 || index === 1 || index === 3;
+    }
+
+    const label = isFemale
+      ? `(女) ${femaleNames[femaleIndex++ % femaleNames.length]}`
+      : `(男) ${maleNames[maleIndex++ % maleNames.length]}`;
+    return { voice, label };
+  });
+};
 
 const getArticleCategories = (articles: Article[] = []) => {
   const categories = new Set<string>();
@@ -225,6 +252,37 @@ export default function FuragoApp({
     articleProgress: articleProgressMap
   } = userState;
 
+  const {
+    voices,
+    selectedVoice,
+    setSelectedVoice,
+    speechRate,
+    setSpeechRate,
+    isPlaying: ttsPlaying,
+    isPaused: ttsPaused,
+    speechRange,
+    highlightRange,
+    currentSentenceIndex,
+    totalSentences,
+    prepareText,
+    playText,
+    handlePlayPause,
+    handleRestartAudio,
+    handlePrevSentence,
+    handleNextSentence,
+    stopAudio,
+    speakWord,
+  } = useSpeechSynthesis();
+
+  const voiceOptions = getSpeechVoiceOptions(voices);
+  const selectedVoiceIndex = selectedVoice ? Math.max(0, voices.indexOf(selectedVoice)) : 0;
+  const readingSpeechRange = speechRange
+    ? { start: speechRange[0], length: speechRange[1] }
+    : null;
+  const readingHighlightRange = highlightRange
+    ? { start: highlightRange[0], length: highlightRange[1] }
+    : { start: -1, length: 0 };
+
 
   const [articles, setArticles] = useState<Article[]>(initialArticles || []);
   const [catalogStatus, setCatalogStatus] = useState<"loading" | "success" | "offline" | "error">(
@@ -261,26 +319,7 @@ export default function FuragoApp({
   const [noQuizCompleted, setNoQuizCompleted] = useState<boolean>(false);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
 
-  // Audio / TTS State
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [queueIndex, setQueueIndex] = useState<number>(0);
-  const [ttsQueue, setTtsQueue] = useState<TtsQueueItem[]>([]);
-  const [highlightRange, setHighlightRange] = useState<{ start: number; length: number }>({
-    start: -1,
-    length: 0,
-  });
-  const [audioSpeed, setAudioSpeed] = useState<number>(1);
-  const [frVoices, setFrVoices] = useState<{ voice: SpeechSynthesisVoice; label: string }[]>([]);
-  const [selectedVoiceIdx, setSelectedVoiceIdx] = useState<number>(0);
-
   const quizTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isPlayingRef = useRef(false);
-  const isPausedRef = useRef(false);
-  const queueIndexRef = useRef(0);
-  const ttsQueueRef = useRef<TtsQueueItem[]>([]);
-  const audioSpeedRef = useRef(1);
-  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const dictRequestIdRef = useRef<number>(0);
 
   // Dictionary Popup State
@@ -945,275 +984,16 @@ export default function FuragoApp({
     fetchCatalog();
   }, [initialArticles]);
 
-  // 2. Initialize French TTS Voices
-  useEffect(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-
-    const loadVoices = () => {
-      const voices = window.speechSynthesis.getVoices() || [];
-      const localFr = voices.filter((v) => {
-        const l = (v.lang || "").toLowerCase();
-        const n = (v.name || "").toLowerCase();
-        if (l.includes("fr-ca") || l.includes("canada") || n.includes("canada") || n.includes("canadien"))
-          return false;
-        if (n.includes("network") || n.includes("réseau")) return false;
-        return l.startsWith("fr");
-      });
-
-      const uniqueVoices: SpeechSynthesisVoice[] = [];
-      const seen = new Set<string>();
-      localFr.forEach((v) => {
-        const id = (v.voiceURI || v.name || "")
-          .toLowerCase()
-          .replace(/-local/g, "")
-          .replace(/-network/g, "")
-          .trim();
-        if (!seen.has(id)) {
-          seen.add(id);
-          uniqueVoices.push(v);
-        }
-      });
-
-      const femaleNames = ["Sophie", "Camille", "Léa", "Alice", "Emma"];
-      const maleNames = ["Thomas", "Lucas", "Hugo", "Paul", "Arthur"];
-      let fIdx = 0;
-      let mIdx = 0;
-
-      const mapped: { voice: SpeechSynthesisVoice; label: string }[] = [];
-      uniqueVoices.forEach((v, idx) => {
-        if (idx === 5) return;
-        const id = (v.voiceURI || v.name || "").toLowerCase();
-        let isFemale = false;
-        if (/vlf|vld|vla|fra|frc|female|femme|hortense|julie|eloise|denise/i.test(id)) {
-          isFemale = true;
-        } else if (/vle|vlc|vlb|frb|frd|male|homme|paul|henri|thomas/i.test(id)) {
-          isFemale = false;
-        } else {
-          isFemale = idx === 0 || idx === 1 || idx === 3;
-        }
-
-        const label = isFemale
-          ? `(女) ${femaleNames[fIdx++ % femaleNames.length]}`
-          : `(男) ${maleNames[mIdx++ % maleNames.length]}`;
-        mapped.push({ voice: v, label });
-      });
-
-      setFrVoices(mapped);
-      if (mapped.length > 0 && !selectedVoiceRef.current) {
-        selectedVoiceRef.current = mapped[0].voice;
-      }
-    };
-
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-  }, []);
-
-  // Stop audio helper
-  const stopAudio = useCallback(() => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-    isPlayingRef.current = false;
-    isPausedRef.current = false;
-    setIsPlaying(false);
-    setIsPaused(false);
-    setHighlightRange({ start: -1, length: 0 });
-  }, []);
-
-  // Build TTS sentence queue when article or level changes
-  const buildQueueForText = useCallback((paragraphs: Paragraph[]) => {
-    const q: TtsQueueItem[] = [];
-    let currentIndex = 0;
-    const regex = /[^.!?\n]+[.!?\n]*\s*/g;
-    let match: RegExpExecArray | null;
-    paragraphs.forEach((p) => {
-      const text = p.fr;
-      const offset = currentIndex;
-      while ((match = regex.exec(text)) !== null) {
-        if (match[0].trim().length > 0) {
-          q.push({
-            text: match[0],
-            start: offset + match.index,
-            length: match[0].length,
-          });
-        }
-      }
-      currentIndex += text.length + 1;
-    });
-
-    ttsQueueRef.current = q;
-    setTtsQueue(q);
-    queueIndexRef.current = 0;
-    setQueueIndex(0);
-    return q;
-  }, []);
-
-  // Play current sentence in TTS queue
-  const playNextInQueue = useCallback(() => {
-    if (!isPlayingRef.current || isPausedRef.current) return;
-    const q = ttsQueueRef.current;
-    const idx = queueIndexRef.current;
-
-    if (idx >= q.length) {
-      isPlayingRef.current = false;
-      isPausedRef.current = false;
-      queueIndexRef.current = 0;
-      setIsPlaying(false);
-      setIsPaused(false);
-      setQueueIndex(0);
-      setHighlightRange({ start: -1, length: 0 });
+  const handleArticlePlayPause = () => {
+    if (!currentArticle) return;
+    if (totalSentences === 0) {
+      const levelData = currentArticle.levels[globalLevel];
+      if (!levelData) return;
+      const speechContent = getSpeechContent(levelData);
+      playText(speechContent.text, speechContent.paragraphs);
       return;
     }
-
-    const item = q[idx];
-    setQueueIndex(idx);
-
-    // Helper pour cibler uniquement le premier mot de la phrase (jamais la phrase entière)
-    const getFirstWordRange = (sentenceItem: TtsQueueItem) => {
-      const m = sentenceItem.text.match(/[a-zA-ZÀ-ÿœŒæÆ]+(?:['’][a-zA-ZÀ-ÿœŒæÆ]+)?/);
-      if (m && m.index !== undefined) {
-        return { start: sentenceItem.start + m.index, length: m[0].length };
-      }
-      return { start: -1, length: 0 };
-    };
-
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-
-    const utterance = new SpeechSynthesisUtterance(item.text);
-    if (selectedVoiceRef.current) {
-      utterance.voice = selectedVoiceRef.current;
-    }
-    utterance.lang = "fr-FR";
-    utterance.rate = audioSpeedRef.current;
-
-    utterance.onstart = () => {
-      setHighlightRange(getFirstWordRange(item));
-    };
-
-    utterance.onboundary = (e) => {
-      if (e.name === "word") {
-        const textRemaining = item.text.substring(e.charIndex);
-        const match = textRemaining.match(/^[a-zA-ZÀ-ÿœŒæÆ]+(?:['’][a-zA-ZÀ-ÿœŒæÆ]+)?/);
-        const wordLength = match ? match[0].length : 1;
-        setHighlightRange({
-          start: item.start + e.charIndex,
-          length: wordLength,
-        });
-      }
-    };
-
-    utterance.onend = () => {
-      if (isPlayingRef.current && !isPausedRef.current) {
-        queueIndexRef.current += 1;
-        // Intentional recursion: onend runs asynchronously, after this stable ([] deps) callback is initialized.
-        // eslint-disable-next-line react-hooks/immutability
-        playNextInQueue();
-      }
-    };
-
-    utterance.onerror = (e) => {
-      if (e.error === "canceled") return;
-
-      isPlayingRef.current = false;
-      isPausedRef.current = false;
-      setIsPlaying(false);
-      setIsPaused(false);
-      setHighlightRange({ start: -1, length: 0 });
-    };
-
-    window.speechSynthesis.speak(utterance);
-  }, []);
-
-  const handlePlayPause = () => {
-    if (!currentArticle) return;
-    const levelData = currentArticle.levels[globalLevel];
-    if (!levelData) return;
-
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-
-    if (isPlaying && !isPaused) {
-      // Pause
-      isPausedRef.current = true;
-      isPlayingRef.current = false;
-      setIsPaused(true);
-      setIsPlaying(false);
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
-    } else {
-      // Play or Resume
-      if (ttsQueueRef.current.length === 0) {
-        buildQueueForText((levelData.paragraphs || levelData.segments || []));
-      }
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
-      isPausedRef.current = false;
-      isPlayingRef.current = true;
-      setIsPaused(false);
-      setIsPlaying(true);
-      playNextInQueue();
-    }
-  };
-
-  const handleRestartAudio = () => {
-    if (!currentArticle) return;
-    const levelData = currentArticle.levels[globalLevel];
-    if (!levelData) return;
-
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-    if (ttsQueueRef.current.length === 0) {
-      buildQueueForText((levelData.paragraphs || levelData.segments || []));
-    }
-    queueIndexRef.current = 0;
-    setQueueIndex(0);
-    isPausedRef.current = false;
-    isPlayingRef.current = true;
-    setIsPaused(false);
-    setIsPlaying(true);
-    setTimeout(() => {
-      playNextInQueue();
-    }, 80);
-  };
-
-  const handlePrevSentence = () => {
-    if (queueIndexRef.current > 0) {
-      queueIndexRef.current -= 1;
-      setQueueIndex(queueIndexRef.current);
-      const item = ttsQueueRef.current[queueIndexRef.current];
-      if (item) {
-        const m = item.text.match(/[a-zA-ZÀ-ÿœŒæÆ]+(?:['’][a-zA-ZÀ-ÿœŒæÆ]+)?/);
-        if (m && m.index !== undefined) {
-          setHighlightRange({ start: item.start + m.index, length: m[0].length });
-        }
-      }
-      if (isPlayingRef.current) {
-        window.speechSynthesis?.cancel();
-        playNextInQueue();
-      }
-    }
-  };
-
-  const handleNextSentence = () => {
-    if (queueIndexRef.current < ttsQueueRef.current.length - 1) {
-      queueIndexRef.current += 1;
-      setQueueIndex(queueIndexRef.current);
-      const item = ttsQueueRef.current[queueIndexRef.current];
-      if (item) {
-        const m = item.text.match(/[a-zA-ZÀ-ÿœŒæÆ]+(?:['’][a-zA-ZÀ-ÿœŒæÆ]+)?/);
-        if (m && m.index !== undefined) {
-          setHighlightRange({ start: item.start + m.index, length: m[0].length });
-        }
-      }
-      if (isPlayingRef.current) {
-        window.speechSynthesis?.cancel();
-        playNextInQueue();
-      }
-    }
+    handlePlayPause();
   };
 
   // Open an article
@@ -1239,7 +1019,8 @@ export default function FuragoApp({
     setSessionReward(null);
     const levelData = article.levels[globalLevel];
     if (levelData) {
-      buildQueueForText((levelData.paragraphs || levelData.segments || []));
+      const speechContent = getSpeechContent(levelData);
+      prepareText(speechContent.text, speechContent.paragraphs);
     }
     
     if (skipHistory) {
@@ -1274,6 +1055,7 @@ export default function FuragoApp({
     }
 
     const handlePopState = (e: PopStateEvent) => {
+      stopAudio();
       const state = e.state;
       if (!state || !state.furago) {
         const query = new URLSearchParams(window.location.search);
@@ -1300,7 +1082,7 @@ export default function FuragoApp({
     
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [navigateTo]);
+  }, [navigateTo, stopAudio]);
 
   // Sync Reading View on popstate or direct URL load
   useEffect(() => {
@@ -1417,19 +1199,6 @@ export default function FuragoApp({
       dictTriggerRef.current = null;
     }
   }, [dictOpen]);
-
-  // Pronounce single word
-  const speakWord = (text: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "fr-FR";
-    u.rate = 0.95;
-    if (selectedVoiceRef.current) {
-      u.voice = selectedVoiceRef.current;
-    }
-    window.speechSynthesis.speak(u);
-  };
 
   // Save word to a specific list
   const saveWordToList = (listId: string) => {
@@ -1799,7 +1568,7 @@ export default function FuragoApp({
       : null;
 
   const progressPercent =
-    ttsQueue.length > 0 ? ((queueIndex + 1) / ttsQueue.length) * 100 : 0;
+    totalSentences > 0 ? ((currentSentenceIndex + 1) / totalSentences) * 100 : 0;
 
   const currentSeriesInfo = currentArticle ? getSeriesInfo(currentArticle, globalLevel) : null;
   const quizNextEp = currentArticle?.seriesId ? currentSeriesInfo?.nextEp : null;
@@ -2098,8 +1867,8 @@ export default function FuragoApp({
           seriesProgress={currentSeriesInfo ? { currentIndex: currentSeriesInfo.currentIndex, total: currentSeriesInfo.total } : null}
           onWordClick={handleWordClick}
           renderVocabularyItem={(word, index) => <TargetVocabularyItem key={index} word={word} onClick={handleWordClick} />}
-          speechRange={ttsQueue[queueIndex] ? { start: ttsQueue[queueIndex].start, length: ttsQueue[queueIndex].length } : null}
-          highlightRange={highlightRange}
+          speechRange={readingSpeechRange}
+          highlightRange={readingHighlightRange}
           quizIndex={quizIndex}
           selectedAnswer={selectedAnswer}
           translatedQuizIds={translatedQuizIds}
@@ -2441,14 +2210,14 @@ export default function FuragoApp({
           </button>
 
           <button
-            onClick={handlePlayPause}
+            onClick={handleArticlePlayPause}
             title={t.reading.playPause}
-            aria-pressed={isPlaying && !isPaused}
+            aria-pressed={ttsPlaying && !ttsPaused}
             style={{
               background:
-                isPlaying && !isPaused
+                ttsPlaying && !ttsPaused
                   ? "#FF9500"
-                  : isPaused
+                  : ttsPaused
                     ? "var(--green)"
                     : "var(--primary)",
               border: "none",
@@ -2463,7 +2232,7 @@ export default function FuragoApp({
               boxShadow: "0 3px 10px rgba(94, 92, 230, 0.3)",
             }}
           >
-            {isPlaying && !isPaused ? (
+            {ttsPlaying && !ttsPaused ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                 <rect x="6" y="4" width="4" height="16"></rect>
                 <rect x="14" y="4" width="4" height="16"></rect>
@@ -2511,22 +2280,17 @@ export default function FuragoApp({
         <div className="audio-progress-container">
           <div
             className="audio-progress-bar"
-            style={{ width: `${isPlaying || isPaused ? progressPercent : 0}%` }}
+            style={{ width: `${ttsPlaying || ttsPaused ? progressPercent : 0}%` }}
           ></div>
         </div>
 
         <div className="audio-options-row">
           <select
             className="audio-select"
-            value={audioSpeed}
+            value={speechRate}
             onChange={(e) => {
               const rate = parseFloat(e.target.value);
-              setAudioSpeed(rate);
-              audioSpeedRef.current = rate;
-              if (isPlayingRef.current) {
-                window.speechSynthesis?.cancel();
-                setTimeout(() => playNextInQueue(), 60);
-              }
+              setSpeechRate(rate);
             }}
           >
             <option value={1}>{appLang === 'ja' ? '速度 : 標準 (1x)' : 'Speed: Normal (1x)'}</option>
@@ -2537,23 +2301,16 @@ export default function FuragoApp({
 
           <select
             className="audio-select"
-            value={selectedVoiceIdx}
+            value={selectedVoiceIndex}
             onChange={(e) => {
               const idx = parseInt(e.target.value, 10);
-              setSelectedVoiceIdx(idx);
-              if (frVoices[idx]) {
-                selectedVoiceRef.current = frVoices[idx].voice;
-                if (isPlayingRef.current) {
-                  window.speechSynthesis?.cancel();
-                  setTimeout(() => playNextInQueue(), 60);
-                }
-              }
+              if (voices[idx]) setSelectedVoice(voices[idx]);
             }}
           >
-            {frVoices.length === 0 ? (
+            {voiceOptions.length === 0 ? (
               <option value={0}>{appLang === 'ja' ? 'フランス語音声 (標準)' : 'French Voice (Default)'}</option>
             ) : (
-              frVoices.map((v, i) => (
+              voiceOptions.map((v, i) => (
                 <option key={i} value={i}>
                   {v.label}
                 </option>
@@ -2730,7 +2487,8 @@ export default function FuragoApp({
                         setSessionReward(null);
 
                         if (currentArticle && currentArticle.levels[lvl]) {
-                          buildQueueForText((currentArticle.levels[lvl].paragraphs || currentArticle.levels[lvl].segments || []));
+                          const speechContent = getSpeechContent(currentArticle.levels[lvl]);
+                          prepareText(speechContent.text, speechContent.paragraphs);
                         }
                         setFilterModalType(null);
                       }}
