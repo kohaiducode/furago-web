@@ -7,6 +7,7 @@ import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib
 import { checkGoalCompletion } from "../lib/progress";
 import ProgressDashboard from "./ProgressDashboard";
 import DictionaryModal from "./DictionaryModal";
+import NewsletterModal from "./NewsletterModal";
 import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "../lib/analytics";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
@@ -380,8 +381,6 @@ export default function FuragoApp({
   // Email Lead Bar, Multi-step Profile Modal & Toast
   const [showLeadBar, setShowLeadBar] = useState<boolean>(false);
   const [leadModalOpen, setLeadModalOpen] = useState<boolean>(false);
-  const leadDialogRef = useRef<HTMLDialogElement>(null);
-  const leadTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (userStateRestoredRef.current) return;
@@ -395,7 +394,8 @@ export default function FuragoApp({
       const wordsDue = (state.learnedVocabulary || []).filter(w => w.dueAt <= Date.now()).length;
       checkAndTrackSessionStart(state.currentStreak || 0, wordsDue);
 
-      if (localStorage.getItem("furago_lead_subscribed") === "1") {
+      const leadSubscribed = localStorage.getItem("furago_lead_subscribed");
+      if (leadSubscribed === "1" || leadSubscribed === "true") {
         setShowLeadBar(false);
       } else {
         setShowLeadBar(true);
@@ -410,30 +410,7 @@ export default function FuragoApp({
     }
   }, [mutateUserState]);
 
-  useEffect(() => {
-    const dialog = leadDialogRef.current;
-    if (leadModalOpen) {
-      if (dialog && !dialog.open) {
-        dialog.showModal();
-      }
-    } else {
-      if (dialog && dialog.open) {
-        dialog.close();
-      }
-      if (leadTriggerRef.current && document.contains(leadTriggerRef.current)) {
-        leadTriggerRef.current.focus();
-      }
-    }
-  }, [leadModalOpen]);
-
-  const [leadStep, setLeadStep] = useState<1 | 2 | 3>(1);
   const [leadEmail, setLeadEmail] = useState<string>("");
-  const [leadFirstName, setLeadFirstName] = useState<string>("");
-  const [leadLevel, setLeadLevel] = useState<string>("LVL_1");
-  const [leadCategories, setLeadCategories] = useState<string[]>([]);
-  const [leadSubmitting, setLeadSubmitting] = useState<boolean>(false);
-  const [leadCheckingEmail, setLeadCheckingEmail] = useState<boolean>(false);
-  const [leadError, setLeadError] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const todayStr = new Date().toLocaleDateString("en-CA"); // local timezone YYYY-MM-DD
@@ -1261,189 +1238,10 @@ export default function FuragoApp({
     showToast(t.toasts.deleted);
   };
 
-  // Liste des catégories proposées à l'inscription (issues des articles + thèmes principaux)
-  const newsletterCategoryOptions = Array.from(
-    new Set([...allCategories, "地理", "文化", "歴史", "グルメ", "ニュース・日常"])
-  );
-
-  // Vérifie localement si l'email a déjà été enregistré sur ce navigateur
-  const isEmailLocallyRegistered = (emailToCheck: string): boolean => {
-    try {
-      const normalized = emailToCheck.trim().toLowerCase();
-      if (!normalized) return false;
-      const single = (localStorage.getItem("furago_lead_email") || "")
-        .trim()
-        .toLowerCase();
-      if (single && single === normalized) return true;
-      const rawList = localStorage.getItem("furago_registered_emails");
-      if (rawList) {
-        const list = JSON.parse(rawList);
-        if (Array.isArray(list) && list.includes(normalized)) return true;
-      }
-    } catch {
-      // ignore
-    }
-    return false;
-  };
-
-  const rememberRegisteredEmail = (emailToSave: string) => {
-    try {
-      const normalized = emailToSave.trim().toLowerCase();
-      if (!normalized) return;
-      localStorage.setItem("furago_lead_email", normalized);
-      const rawList = localStorage.getItem("furago_registered_emails");
-      const list: string[] = rawList ? JSON.parse(rawList) : [];
-      if (!list.includes(normalized)) {
-        list.push(normalized);
-        localStorage.setItem("furago_registered_emails", JSON.stringify(list));
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  // Lance une vérification silencieuse en arrière-plan auprès de Google Sheets
-  const checkEmailInBackground = (emailToCheck: string) => {
-    const normalizedEmail = emailToCheck.trim().toLowerCase();
-    if (!normalizedEmail) return;
-
-    const scriptUrl =
-      process.env.NEXT_PUBLIC_GOOGLE_SCRIPT_URL ||
-      "https://script.google.com/macros/s/AKfycbxUb-hUABm9TodggnQgnxrXjhmFzhxQxo-7beGqTdTLAlkI_kdEjQUXGeLMrq9Lhvg1QQ/exec";
-    if (!scriptUrl) return;
-
-    fetch(scriptUrl, {
-      method: "POST",
-      redirect: "follow",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        action: "check_email",
-        email: normalizedEmail,
-      }),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && data.status === "already_exists") {
-          rememberRegisteredEmail(normalizedEmail);
-          setLeadStep(1);
-          setLeadError(t.toasts.emailRegistered);
-          showToast(t.toasts.emailRegistered);
-        }
-      })
-      .catch(() => {});
-  };
-
-  // Clic sur "登録" dans la barre du haut -> Ouvre la modale de profil à l'étape 1
+  // Ouvre la modale d'inscription en conservant l'e-mail saisi dans la barre rapide.
   const handleOpenLeadModal = (e: React.FormEvent) => {
     e.preventDefault();
-    leadTriggerRef.current = document.activeElement as HTMLElement;
-    setLeadError(null);
-    setLeadSubmitting(false);
-    setLeadCheckingEmail(false);
-
-    if (leadEmail.trim()) {
-      if (isEmailLocallyRegistered(leadEmail)) {
-        showToast(t.toasts.emailRegistered);
-        return;
-      }
-      // Si l'utilisateur a déjà tapé son email dans la barre du haut, on lance la vérif en tâche de fond dès l'ouverture !
-      checkEmailInBackground(leadEmail);
-    }
-
-    setLeadStep(1);
-    setLeadLevel("LVL_1");
     setLeadModalOpen(true);
-  };
-
-  // Validation des étapes (instantanée 0ms) et envoi final en arrière-plan (Étape 3)
-  const handleLeadProfileSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setLeadError(null);
-
-    const scriptUrl =
-      process.env.NEXT_PUBLIC_GOOGLE_SCRIPT_URL ||
-      "https://script.google.com/macros/s/AKfycbxUb-hUABm9TodggnQgnxrXjhmFzhxQxo-7beGqTdTLAlkI_kdEjQUXGeLMrq9Lhvg1QQ/exec";
-
-    if (leadStep === 1) {
-      if (!leadFirstName.trim() || !leadEmail.trim()) {
-        setLeadError(t.toasts.enterAllFields);
-        return;
-      }
-
-      const normalizedEmail = leadEmail.trim().toLowerCase();
-      if (isEmailLocallyRegistered(normalizedEmail)) {
-        setLeadError(t.toasts.emailRegistered);
-        showToast(t.toasts.emailRegistered);
-        return;
-      }
-
-      // Passage instantané à l'étape 2 sans faire attendre l'utilisateur,
-      // pendant que la vérification Google Sheet tourne en tâche de fond !
-      setLeadStep(2);
-      checkEmailInBackground(normalizedEmail);
-      return;
-    }
-
-    if (leadStep === 2) {
-      setLeadStep(3);
-      return;
-    }
-
-    if (leadCategories.length === 0) {
-      setLeadError(t.toasts.selectCategory);
-      return;
-    }
-
-    const email = leadEmail.trim().toLowerCase();
-    if (!email) return;
-
-    if (isEmailLocallyRegistered(email)) {
-      setLeadStep(1);
-      setLeadError(t.toasts.emailRegistered);
-      showToast(t.toasts.emailRegistered);
-      return;
-    }
-
-    const payload = {
-      email,
-      name: leadFirstName.trim(),
-      firstName: leadFirstName.trim(),
-      gender: "Not specified",
-      level: leadLevel,
-      categories: leadCategories,
-      source: "FuragoWeb",
-    };
-
-    // Fermeture immédiate du pop-up (0ms d'attente pour l'utilisateur)
-    rememberRegisteredEmail(email);
-    localStorage.setItem("furago_lead_subscribed", "1");
-    setLeadSubmitting(false);
-    setLeadModalOpen(false);
-    setShowLeadBar(false);
-    showToast(t.toasts.registrationSuccess);
-
-    // Envoi en tâche de fond vers Google Sheets + déclenchement de l'email de bienvenue
-    if (scriptUrl) {
-      fetch(scriptUrl, {
-        method: "POST",
-        redirect: "follow",
-        keepalive: true,
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload),
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (
-            data &&
-            (data.status === "already_exists" || data.status === "updated")
-          ) {
-            showToast(t.toasts.emailRegistered);
-          }
-        })
-        .catch((err) => {
-          console.error("Erreur lors de l'envoi en arrière-plan:", err);
-        });
-    }
   };
 
   // Filtered articles for Home view
@@ -1686,7 +1484,7 @@ export default function FuragoApp({
   const openFilterModal = useCallback((type: "level" | "category", trigger: HTMLButtonElement | null) => {
     filterTriggerRef.current = trigger;
     setFilterModalType(type);
-  }, []);
+  }, [setFilterModalType]);
 
   return (
     <div className="app-shell">
@@ -2579,421 +2377,42 @@ export default function FuragoApp({
         )}
       </dialog>
 
-      {/* Newsletter 3-Step Profile Registration Modal */}
-      <dialog
-        ref={leadDialogRef}
-        className="lead-dialog"
-        onClose={() => setLeadModalOpen(false)}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
+      {leadModalOpen && (
+        <NewsletterModal
+          isOpen={leadModalOpen}
+          onClose={() => setLeadModalOpen(false)}
+          appLang={appLang}
+          availableCategories={allCategories}
+          initialEmail={leadEmail}
+          onSuccess={(email) => {
+            const normalizedEmail = email.trim().toLowerCase();
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.setItem("furago_lead_subscribed", "true");
+                localStorage.setItem("furago_lead_email", normalizedEmail);
+                const rawList = localStorage.getItem("furago_registered_emails");
+                const storedList: unknown = rawList ? JSON.parse(rawList) : [];
+                const registeredEmails = Array.isArray(storedList)
+                  ? storedList.filter((item): item is string => typeof item === "string")
+                  : [];
+                if (!registeredEmails.includes(normalizedEmail)) {
+                  registeredEmails.push(normalizedEmail);
+                }
+                localStorage.setItem(
+                  "furago_registered_emails",
+                  JSON.stringify(registeredEmails)
+                );
+              } catch {
+                // Ignore unavailable or malformed local storage data.
+              }
+            }
+            setLeadEmail(normalizedEmail);
             setLeadModalOpen(false);
-          }
-        }}
-        aria-labelledby="lead-modal-title"
-      >
-        {leadModalOpen && (
-          <form
-            className="modal-sheet"
-            style={{ maxWidth: "440px", margin: "0 auto", boxSizing: "border-box" }}
-            onSubmit={handleLeadProfileSubmit}
-          >
-            {/* Header + Close Button */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "10px",
-              }}
-            >
-              <h3 id="lead-modal-title" style={{ fontSize: "1.15rem", fontWeight: 800, color: "var(--primary)" }}>
-                {t.newsletter.title}
-              </h3>
-              <button
-                type="button"
-                aria-label={t.common.close}
-                onClick={() => setLeadModalOpen(false)}
-                style={{
-                  background: "var(--bg)",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: "30px",
-                  height: "30px",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  color: "var(--text-muted)",
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Barre de progression 3 etapes */}
-            <div style={{ marginBottom: "18px" }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: "0.75rem",
-                  fontWeight: 700,
-                  color: "var(--text-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                <span>Step {leadStep} / 3</span>
-                <span>
-                  {leadStep === 1
-                    ? t.newsletter.step1
-                    : leadStep === 2
-                      ? t.newsletter.step2
-                      : t.newsletter.step3}
-                </span>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: "6px",
-                }}
-              >
-                {[1, 2, 3].map((step) => (
-                  <div
-                    key={step}
-                    style={{
-                      flex: 1,
-                      height: "5px",
-                      borderRadius: "3px",
-                      background:
-                        step <= leadStep ? "var(--primary)" : "var(--border)",
-                      transition: "background 0.25s ease",
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Message d'erreur */}
-            {leadError && (
-              <div
-                style={{
-                  background: "rgba(255, 59, 48, 0.1)",
-                  border: "1px solid #FF3B30",
-                  color: "#D70015",
-                  padding: "10px 12px",
-                  borderRadius: "10px",
-                  fontSize: "0.86rem",
-                  fontWeight: 700,
-                  marginBottom: "14px",
-                  textAlign: "center",
-                }}
-              >
-                {leadError}
-              </div>
-            )}
-
-            {/* ETAPE 1 : Prenom, Email */}
-            {leadStep === 1 && (
-              <div className="fade-in">
-                <label
-                  htmlFor="lead-first-name"
-                  style={{
-                    display: "block",
-                    fontSize: "0.84rem",
-                    fontWeight: 700,
-                    marginBottom: "6px",
-                  }}
-                >
-                  {t.newsletter.name}
-                </label>
-                <input
-                  id="lead-first-name"
-                  type="text"
-                  required
-                  autoFocus
-                  value={leadFirstName}
-                  onChange={(e) => {
-                    setLeadFirstName(e.target.value);
-                    setLeadError(null);
-                  }}
-                  placeholder={appLang === 'ja' ? "例: 太郎 / Taro" : "e.g. Taro"}
-                  style={{
-                    width: "100%",
-                    padding: "11px 12px",
-                    borderRadius: "10px",
-                    border: "1px solid var(--border)",
-                    background: "var(--bg)",
-                    fontSize: "0.95rem",
-                    marginBottom: "14px",
-                    outline: "none",
-                  }}
-                />
-
-                <label
-                  htmlFor="lead-email"
-                  style={{
-                    display: "block",
-                    fontSize: "0.84rem",
-                    fontWeight: 700,
-                    marginBottom: "6px",
-                  }}
-                >
-                  {t.newsletter.email}
-                </label>
-                <input
-                  id="lead-email"
-                  type="email"
-                  required
-                  value={leadEmail}
-                  onChange={(e) => {
-                    setLeadEmail(e.target.value);
-                    setLeadError(null);
-                  }}
-                  placeholder="example@mail.com"
-                  style={{
-                    width: "100%",
-                    padding: "11px 12px",
-                    borderRadius: "10px",
-                    border: "1px solid var(--border)",
-                    background: "var(--bg)",
-                    fontSize: "0.95rem",
-                    marginBottom: "22px",
-                    outline: "none",
-                  }}
-                />
-
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button
-                    type="button"
-                    onClick={() => setLeadModalOpen(false)}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      background: "var(--bg)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      color: "var(--text-main)",
-                    }}
-                  >
-                    {t.newsletter.cancel}
-                  </button>
-                  <button
-                    type="submit"
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      background: "var(--primary)",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {leadCheckingEmail ? (appLang === 'ja' ? "確認中..." : "Checking...") : (appLang === 'ja' ? '次へ' : 'Next')}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ETAPE 2 : Niveau de francais */}
-            {leadStep === 2 && (
-              <div className="fade-in">
-                <p
-                  style={{
-                    fontSize: "0.95rem",
-                    marginBottom: "14px",
-                    color: "var(--text-main)",
-                    fontWeight: 600,
-                  }}
-                >
-                  {appLang === 'ja' ? '現在のフランス語レベルを教えてください。' : 'What is your current French level?'}
-                </p>
-                <div
-                  style={{
-                    display: "grid",
-                    gap: "8px",
-                    marginBottom: "22px",
-                  }}
-                >
-                  {["LVL_1", "LVL_2", "LVL_3", "LVL_4"].map((code) => (
-                    <button
-                      key={code}
-                      type="button"
-                      onClick={() => {
-                        setLeadLevel(code);
-                        setLeadError(null);
-                      }}
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: "12px",
-                        border:
-                          leadLevel === code
-                            ? "2px solid var(--primary)"
-                            : "2px solid var(--border)",
-                        background:
-                          leadLevel === code
-                            ? "var(--primary-light)"
-                            : "var(--surface)",
-                        textAlign: "left",
-                        cursor: "pointer",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <span style={{ fontWeight: 600 }}>
-                        {t.levels[code as keyof typeof t.levels]}
-                      </span>
-                      {leadLevel === code && <span>✔️</span>}
-                    </button>
-                  ))}
-                </div>
-
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button
-                    type="button"
-                    onClick={() => setLeadStep(1)}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      background: "var(--bg)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      color: "var(--text-main)",
-                    }}
-                  >
-                    Back
-                  </button>
-                  <button
-                    type="submit"
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      background: "var(--primary)",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ETAPE 3 : Categories preferees */}
-            {leadStep === 3 && (
-              <div className="fade-in">
-                <p
-                  style={{
-                    fontSize: "0.95rem",
-                    marginBottom: "14px",
-                    color: "var(--text-main)",
-                    fontWeight: 600,
-                  }}
-                >
-                  {appLang === 'ja' ? '興味のあるカテゴリーを選んでください' : 'Select the categories you are interested in'}
-                  <br />
-                  <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 400 }}>
-                    {appLang === 'ja' ? '（1つ以上タップして選択）' : '(Tap to select one or more)'}
-                  </span>
-                </p>
-
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: "8px",
-                    marginBottom: "22px",
-                    maxHeight: "220px",
-                    overflowY: "auto",
-                    paddingBottom: "10px",
-                  }}
-                >
-                  {newsletterCategoryOptions.map((cat) => {
-                    const isSelected = leadCategories.includes(cat);
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => {
-                          setLeadError(null);
-                          if (isSelected) {
-                            setLeadCategories((prev) =>
-                              prev.filter((c) => c !== cat)
-                            );
-                          } else {
-                            setLeadCategories((prev) => [...prev, cat]);
-                          }
-                        }}
-                        style={{
-                          padding: "8px 14px",
-                          borderRadius: "20px",
-                          border: isSelected
-                            ? "2px solid var(--primary)"
-                            : "1px solid var(--border)",
-                          background: isSelected
-                            ? "var(--primary-light)"
-                            : "var(--surface)",
-                          color: isSelected
-                            ? "var(--primary)"
-                            : "var(--text-main)",
-                          fontWeight: 600,
-                          fontSize: "0.85rem",
-                          cursor: "pointer",
-                          transition: "all 0.2s",
-                        }}
-                      >
-                        {isSelected ? `✓ ${cat}` : cat}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button
-                    type="button"
-                    onClick={() => setLeadStep(2)}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      background: "var(--bg)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      color: "var(--text-main)",
-                    }}
-                  >
-                    Back
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={leadSubmitting}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      background: leadSubmitting ? "var(--border)" : "var(--primary)",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "12px",
-                      fontWeight: 700,
-                      cursor: leadSubmitting ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {leadSubmitting ? (appLang === 'ja' ? "送信中..." : "Submitting...") : t.newsletter.submit}
-                  </button>
-                </div>
-              </div>
-            )}
-          </form>
-        )}
-      </dialog>
+            setShowLeadBar(false);
+            showToast(t.toasts.registrationSuccess);
+          }}
+        />
+      )}
     </div>
   );
 }
