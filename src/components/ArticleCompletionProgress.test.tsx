@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import React from "react";
-import FuragoApp, { Article } from "./FuragoApp";
+import FuragoApp from "./FuragoApp";
+import type { Article } from "@/types/article";
 import { loadUserState, UserState } from "../lib/userState";
 import { deriveReadingProgress } from "../lib/progress";
 

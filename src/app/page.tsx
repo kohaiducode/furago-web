@@ -1,4 +1,5 @@
-import FuragoApp, { Article } from "@/components/FuragoApp";
+import FuragoApp from "@/components/FuragoApp";
+import type { Article } from "@/types/article";
 
 async function getArticles(): Promise<Article[]> {
   try {

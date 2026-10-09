@@ -46,12 +46,13 @@ body {
   padding-bottom: calc(85px + env(safe-area-inset-bottom));
 }
 
-/* Barre de capture d'email en haut (pleine largeur, contenu aligné) */
+/* Barre de capture d'email compacte en haut (pleine largeur, contenu aligné) */
 .lead-bar {
   width: 100%;
-  background: linear-gradient(90deg, #5e5ce6 0%, #4b49c8 100%);
-  color: #ffffff;
-  padding: 8px max(16px, calc((100vw - var(--content-max-width)) / 2 + 20px));
+  background: var(--surface);
+  color: var(--text-main);
+  border-bottom: 1px solid var(--border);
+  padding: 6px max(16px, calc((100vw - var(--content-max-width)) / 2 + 20px));
   font-size: 0.8rem;
   display: flex;
   align-items: center;
@@ -69,9 +70,9 @@ body {
 }
 
 .lead-bar-input {
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  color: #ffffff;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-main);
   border-radius: 8px;
   padding: 5px 12px;
   font-size: 0.8rem;
@@ -82,17 +83,17 @@ body {
 }
 
 .lead-bar-input::placeholder {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-muted);
 }
 
 .lead-bar-input:focus {
-  background: rgba(255, 255, 255, 0.26);
-  border-color: #ffffff;
+  background: var(--surface);
+  border-color: var(--primary);
 }
 
 .lead-bar-btn {
-  background: #ffffff;
-  color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
   border: none;
   border-radius: 8px;
   padding: 5px 12px;
@@ -105,6 +106,23 @@ body {
 
 .lead-bar-btn:active {
   transform: scale(0.95);
+}
+
+@media (max-width: 600px) {
+  .lead-bar {
+    padding: 5px 12px;
+    gap: 8px;
+  }
+  .lead-bar > span {
+    font-size: 0.75rem;
+  }
+  .lead-bar-input {
+    max-width: 140px;
+    padding: 4px 10px;
+  }
+  .lead-bar-btn {
+    padding: 4px 10px;
+  }
 }
 
 /* Animations */
@@ -356,6 +374,124 @@ body {
   }
   .reading-view {
     padding: 28px 24px 180px;
+  }
+}
+
+/* Home 6.3-D.2-B: primary action -> catalogue -> secondary */
+.home-primary-action {
+  margin-bottom: 20px;
+}
+
+.home-catalog {
+  margin-bottom: 24px;
+}
+
+.home-catalog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.home-catalog-header h2 {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.home-catalog-header .filters-bar {
+  margin-bottom: 0;
+}
+
+.home-secondary {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.home-secondary > section {
+  margin: 0;
+}
+
+.habit-status-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.habit-streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-right: 4px;
+}
+
+.habit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.habit-pill[data-done="true"] {
+  border-color: var(--primary);
+  background: var(--surface);
+  color: var(--primary);
+}
+
+.habit-nudge-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.85rem;
+  color: var(--text-main);
+  margin-bottom: 12px;
+}
+
+.habit-nudge-compact[data-state="at_risk"],
+.habit-nudge-compact[data-state="broken"] {
+  background: var(--primary-light);
+  border-color: var(--primary-light);
+}
+
+.habit-nudge-compact p {
+  margin: 0;
+}
+
+.primary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+@media (min-width: 700px) {
+  .home-catalog-header {
+    flex-wrap: nowrap;
+  }
+  .home-catalog-header .filters-bar {
+    justify-content: flex-end;
   }
 }
 

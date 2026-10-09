@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import FuragoApp from './FuragoApp';
 import * as userStateMock from '../lib/userState';
 
@@ -101,6 +103,7 @@ describe('FuragoApp 5.5-A Refactor Regression Tests', () => {
       configurable: true
     });
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   const setLocationSearch = (search: string) => {
@@ -216,5 +219,92 @@ describe('FuragoApp 5.5-A Refactor Regression Tests', () => {
     render(<FuragoApp initialArticles={mockArticles as any} />);
     expect(screen.getAllByText('Technology').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Science').length).toBeGreaterThan(0);
+  });
+
+  it('APP-WORDBOOK-01: URL ?view=words renders the Wordbook lists from UserState', () => {
+    const state = getMockUserState() as any;
+    state.wordLists = [{ id: "default", name: "Ma liste" }];
+    state.savedVocabulary = [{ fr: "bonjour", ja: "hello", listId: "default", date: "2026-01-01" }];
+    vi.mocked(userStateMock.loadUserState).mockReturnValue(state);
+    setLocationSearch('?view=words');
+
+    render(<FuragoApp initialArticles={mockArticles as any} />);
+
+    expect(screen.getByText('Furago — Mots appris')).toBeDefined();
+    expect(screen.getByText('Ma liste')).toBeDefined();
+  });
+
+  it('HOME-ARCH-01: primary action precedes the article catalogue and filters sit above the list', () => {
+    const { container } = render(<FuragoApp initialArticles={mockArticles as any} />);
+
+    const primary = container.querySelector('.primary-card');
+    const catalog = container.querySelector('#home-catalog');
+    expect(primary).not.toBeNull();
+    expect(catalog).not.toBeNull();
+
+    // Primary action appears before the catalogue in document order.
+    const positionPrimary = Array.from(container.querySelectorAll('.primary-card, #home-catalog')).indexOf(primary as Element);
+    const positionCatalog = Array.from(container.querySelectorAll('.primary-card, #home-catalog')).indexOf(catalog as Element);
+    expect(positionPrimary).toBeLessThan(positionCatalog);
+
+    // Filters are inside the catalogue section.
+    const filters = catalog?.querySelector('.filters-bar');
+    expect(filters).not.toBeNull();
+
+    // Article list follows the filters inside the catalogue.
+    const articleList = catalog?.querySelector('.article-list');
+    expect(articleList).not.toBeNull();
+  });
+
+  it('USERSTATE-HYDRATION-01: server markup is stable, persisted state restores, and the home action is recalculated', async () => {
+    const today = new Date().toLocaleDateString('en-CA');
+    const persistedState = {
+      ...getMockUserState(),
+      xp: 42,
+      savedVocabulary: [{ fr: 'bonjour', ja: 'こんにちは', listId: 'default', date: today }],
+      dailyMissionTarget: { date: today, articleId: '2', level: 'LVL_1' },
+    };
+    const persistedRaw = JSON.stringify(persistedState);
+    localStorage.setItem('furago:user-state:v1', persistedRaw);
+    vi.mocked(userStateMock.loadUserState).mockReturnValue(persistedState as any);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ articles: mockArticles }),
+    }));
+
+    const browserWindow = window;
+    vi.stubGlobal('window', undefined as unknown as Window);
+    let serverMarkup: string;
+    try {
+      serverMarkup = renderToString(<FuragoApp initialArticles={mockArticles as any} />);
+    } finally {
+      vi.stubGlobal('window', browserWindow);
+    }
+
+    const serverContainer = document.createElement('div');
+    serverContainer.innerHTML = serverMarkup;
+    expect(serverContainer.querySelector('#home-primary-title')?.textContent).toBe('次の学習');
+    expect(userStateMock.loadUserState).not.toHaveBeenCalled();
+
+    const container = document.createElement('div');
+    container.innerHTML = serverMarkup;
+    document.body.appendChild(container);
+    const recoverableErrors: unknown[] = [];
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    await act(async () => {
+      root = hydrateRoot(container, <FuragoApp initialArticles={mockArticles as any} />, {
+        onRecoverableError: (error) => recoverableErrors.push(error),
+      });
+    });
+
+    expect(recoverableErrors).toEqual([]);
+    expect(container.querySelector('#home-primary-title')?.textContent).toBe('今日のミッション');
+    expect(userStateMock.loadUserState).toHaveBeenCalledTimes(1);
+    expect(userStateMock.saveUserState).not.toHaveBeenCalled();
+    expect(localStorage.getItem('furago:user-state:v1')).toBe(persistedRaw);
+    expect(container.querySelector('.stat-xp')?.textContent).toContain('42');
+
+    await act(async () => root?.unmount());
+    container.remove();
   });
 });

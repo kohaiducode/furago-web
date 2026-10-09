@@ -1,89 +1,21 @@
 "use client";
 
-import { loadUserState, updateUserState, UserState, LearnedWord, mergeLearnedVocabulary } from "../lib/userState";
+import { loadUserState, updateUserState, mergeLearnedVocabulary } from "../lib/userState";
+import type { SavedWord, UserState, WordList } from "../lib/userState";
 import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset, determineNextBestActionType, completedArticleId } from "../lib/home";
 import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
-import { derivePedagogicalProgress, checkGoalCompletion } from "../lib/progress";
+import { checkGoalCompletion } from "../lib/progress";
 import ProgressDashboard from "./ProgressDashboard";
 import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "../lib/analytics";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { DictionaryService, DictLookupResult } from "@/lib/dictionary";
+import HomeView from "@/features/home/HomeView";
+import ReadingView from "@/features/reading/ReadingView";
+import VocabReviewView, { type VocabReviewAction } from "@/features/vocab-review/VocabReviewView";
+import WordbookView from "@/features/wordbook/WordbookView";
+import type { Article, Paragraph } from "@/types/article";
 
-import { getTranslation, AppLanguage, getGoalText } from "@/lib/i18n";
-
-export interface TranslatableText {
-  fr: string;
-  ja: string;
-  en: string;
-}
-
-export interface Paragraph {
-  id: string;
-  fr: string;
-  ja: string;
-  en: string;
-}
-
-export interface QuizChoice {
-  id: string;
-  text: TranslatableText;
-  isCorrect: boolean;
-}
-
-export interface QuizQuestion {
-  id: string;
-  question?: TranslatableText;
-  prompt?: TranslatableText;
-  choices?: QuizChoice[];
-  // For backwards compatibility with old mock data
-  text?: string;
-  options?: Record<string, string> | QuizChoice[];
-  answer?: string;
-}
-
-export interface ArticleLevelData {
-  title: string | TranslatableText;
-  paragraphs?: Paragraph[];
-  segments?: Paragraph[];
-  quiz?: QuizQuestion[];
-  // For backwards compatibility
-  content?: string;
-  learningGoal?: TranslatableText;
-  targetVocabulary?: string[];
-}
-
-export type Category = TranslatableText | string;
-
-export interface Article {
-  id: number | string;
-  date?: string;
-  originalTitle?: string;
-  category?: Category;
-  imageUrl?: string;
-  levels: Record<string, ArticleLevelData>;
-  seriesId?: string | null;
-  seriesOrder?: number | null;
-  featured?: boolean;
-}
-
-interface WordList {
-  id: string;
-  name: string;
-}
-
-interface SavedWord {
-  fr: string;
-  originalWord?: string;
-  ja: string;
-  conciseDef?: string;
-  nature?: string;
-  gender?: string;
-  phraseOriginale?: string;
-  traductionPhrase?: string;
-  definitions?: string[];
-  listId: string;
-  date: string;
-}
+import { getTranslation, AppLanguage } from "@/lib/i18n";
 
 interface TtsQueueItem {
   text: string;
@@ -96,26 +28,16 @@ const LEVELS = ["LVL_1", "LVL_2", "LVL_3", "LVL_4"];
 // Reserved id for the read-only system list "📚 Furago — Mots appris".
 // Never part of wordLists, so it cannot be renamed, deleted, or used as a save target.
 const LEARNED_LIST_ID = "__furago_learned__";
-const LEARNED_LIST_NAME = "📚 Furago — Mots appris";
 
-function extractDriveId(url?: string): string | null {
-  if (!url) return null;
-  const trimmed = url.trim();
-  const matchFile = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if (matchFile && matchFile[1]) return matchFile[1];
-  const matchIdParam = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (matchIdParam && matchIdParam[1]) return matchIdParam[1];
-  return null;
-}
-
-function formatDriveUrl(url?: string): string {
-  if (!url) return "";
-  const id = extractDriveId(url);
-  if (id) {
-    return `https://lh3.googleusercontent.com/d/${id}=w1000`;
-  }
-  return url.trim();
-}
+const getArticleCategories = (articles: Article[] = []) => {
+  const categories = new Set<string>();
+  articles.forEach((article) => {
+    if (article.category) {
+      categories.add((typeof article.category === "string" ? article.category : (article.category?.ja || "")).trim());
+    }
+  });
+  return Array.from(categories);
+};
 
 const TargetVocabularyItem = ({ word, onClick }: { word: string, onClick: (e: React.MouseEvent<HTMLElement>, w: string, s: string) => void }) => {
   const [def, setDef] = useState<string>("");
@@ -232,9 +154,7 @@ export default function FuragoApp({
 
 
   // Articles & Filters
-    const [userState, setReactUserState] = useState<UserState>(() => {
-    if (typeof window !== 'undefined') return loadUserState();
-    return {
+  const [userState, setReactUserState] = useState<UserState>(() => ({
       level: "LVL_1",
       savedVocabulary: [],
       learnedVocabulary: [],
@@ -253,12 +173,19 @@ export default function FuragoApp({
       vocabReviewXPDate: "",
       lastOpenedArticleId: "",
       articleProgress: {},
-    };
-  });
+    }));
+  const [userStateRestored, setUserStateRestored] = useState(false);
 
   const userStateRef = useRef<UserState>(userState);
+  const userStateRestoredRef = useRef(false);
+  const pendingUserStateUpdatesRef = useRef<Array<Partial<UserState> | ((prev: UserState) => Partial<UserState>)>>([]);
 
   const mutateUserState = useCallback((updater: Partial<UserState> | ((prev: UserState) => Partial<UserState>)) => {
+    if (!userStateRestoredRef.current) {
+      pendingUserStateUpdatesRef.current.push(updater);
+      return;
+    }
+
     const prev = userStateRef.current;
     const updates = typeof updater === 'function' ? updater(prev) : updater;
     if (!updates || Object.keys(updates).length === 0) return;
@@ -303,8 +230,8 @@ export default function FuragoApp({
   const [catalogStatus, setCatalogStatus] = useState<"loading" | "success" | "offline" | "error">(
     (initialArticles && initialArticles.length > 0) ? "success" : "loading"
   );
-  const [allCategories, setAllCategories] = useState<string[]>([]);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [allCategories, setAllCategories] = useState<string[]>(() => getArticleCategories(initialArticles));
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => getArticleCategories(initialArticles));
   const [filterModalType, setFilterModalType] = useState<"level" | "category" | null>(null);
   const filterDialogRef = useRef<HTMLDialogElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -415,6 +342,33 @@ export default function FuragoApp({
   const [leadModalOpen, setLeadModalOpen] = useState<boolean>(false);
   const leadDialogRef = useRef<HTMLDialogElement>(null);
   const leadTriggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (userStateRestoredRef.current) return;
+
+    try {
+      const state = loadUserState();
+      userStateRef.current = state;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setReactUserState(state);
+
+      const wordsDue = (state.learnedVocabulary || []).filter(w => w.dueAt <= Date.now()).length;
+      checkAndTrackSessionStart(state.currentStreak || 0, wordsDue);
+
+      if (localStorage.getItem("furago_lead_subscribed") === "1") {
+        setShowLeadBar(false);
+      } else {
+        setShowLeadBar(true);
+      }
+    } catch (e) {
+      console.error("Error loading localStorage", e);
+    } finally {
+      userStateRestoredRef.current = true;
+      setUserStateRestored(true);
+      const pendingUpdates = pendingUserStateUpdatesRef.current.splice(0);
+      pendingUpdates.forEach(mutateUserState);
+    }
+  }, [mutateUserState]);
 
   useEffect(() => {
     const dialog = leadDialogRef.current;
@@ -725,7 +679,7 @@ export default function FuragoApp({
 
 
   useEffect(() => {
-    if (articles.length === 0) return;
+    if (!userStateRestored || articles.length === 0) return;
     const target = userState.dailyMissionTarget;
     if (!target || target.date !== todayStr || target.level !== globalLevel) {
       const available = articles.filter(a => a.levels && a.levels[globalLevel]);
@@ -743,7 +697,7 @@ export default function FuragoApp({
         dailyMissionTarget: { date: todayStr, articleId: String(selected.id), level: globalLevel }
       }));
     }
-  }, [articles, globalLevel, todayStr, userState.dailyMissionTarget, completedArticleIds, mutateUserState]);
+  }, [userStateRestored, articles, globalLevel, todayStr, userState.dailyMissionTarget, completedArticleIds, mutateUserState]);
 
   const dailyArticle = React.useMemo(() => {
     const target = userState.dailyMissionTarget;
@@ -826,7 +780,7 @@ export default function FuragoApp({
 
   // --- Reading Progress Tracking & Restoration ---
   useEffect(() => {
-    if (activeView !== "reading" || !currentArticle) return;
+    if (!userStateRestored || activeView !== "reading" || !currentArticle) return;
 
     const progressKey = `${currentArticle.id}::${globalLevel}`;
     const state = userStateRef.current;
@@ -877,9 +831,10 @@ export default function FuragoApp({
       if (scrollTimeout) clearTimeout(scrollTimeout);
       if (restoreTimeout) clearTimeout(restoreTimeout);
     };
-  }, [activeView, currentArticle, globalLevel]);
+  }, [userStateRestored, activeView, currentArticle, globalLevel]);
 
   useEffect(() => {
+    if (!userStateRestored) return;
     if (activeView === "reading" && currentArticle) {
       const q = currentArticle.levels[globalLevel]?.quiz;
       if (!q || q.length === 0) {
@@ -926,7 +881,7 @@ export default function FuragoApp({
         }
       }
     }
-  }, [activeView, currentArticle, globalLevel, quizIndex, quizScore, updateStreak, checkAndAwardArticleXP, checkAndAwardQuizXP, noQuizCompleted, dailyArticle, todayStr, checkAndAwardDailyMissionXP, sessionReward]);
+  }, [userStateRestored, activeView, currentArticle, globalLevel, quizIndex, quizScore, updateStreak, checkAndAwardArticleXP, checkAndAwardQuizXP, noQuizCompleted, dailyArticle, todayStr, checkAndAwardDailyMissionXP, sessionReward]);
 
   const { continueArticle, currentSeriesNextEp } = React.useMemo(() => {
     let nextEp: Article | null = null;
@@ -951,34 +906,6 @@ export default function FuragoApp({
   // 1. Initialize Dictionary, LocalStorage, Voices, and refresh Articles
   useEffect(() => {
     DictionaryService.init();
-
-    // Load centralized user state
-    try {
-      const state = loadUserState();
-      userStateRef.current = state;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setReactUserState(state);
-      
-      const wordsDue = (state.learnedVocabulary || []).filter(w => w.dueAt <= Date.now()).length;
-      checkAndTrackSessionStart(state.currentStreak || 0, wordsDue);
-
-      if (localStorage.getItem("furago_lead_subscribed") === "1") {
-        setShowLeadBar(false);
-      } else {
-        setShowLeadBar(true);
-      }
-    } catch (e) {
-      console.error("Error loading localStorage", e);
-    }
-
-    // Extract categories from initialArticles
-    const initCats = new Set<string>();
-    (initialArticles || []).forEach((a) => {
-      if (a.category) initCats.add((typeof a.category === "string" ? a.category : (a.category?.ja || "")).trim());
-    });
-    const catArray = Array.from(initCats);
-    setAllCategories(catArray);
-    setSelectedCategories(catArray);
 
     // Fetch latest articles from GitHub in case new ones were published
     const fetchCatalog = () => {
@@ -1832,18 +1759,9 @@ export default function FuragoApp({
     // eslint-disable-next-line react-hooks/preserve-manual-memoization
   }, [filteredArticles, completedArticleIds]);
 
-  const homeCard: React.CSSProperties = { background: "var(--surface)", borderRadius: "18px", border: "1px solid var(--border)", padding: "14px", marginBottom: "4px", boxSizing: "border-box", maxWidth: "100%" };
-  const homeSectionLabel: React.CSSProperties = { fontSize: "0.78rem", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", margin: "20px 0 8px" };
-  const homeMeta: React.CSSProperties = { margin: "4px 0 0", color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 600, overflowWrap: "anywhere" };
-  const homeTitle: React.CSSProperties = { margin: 0, fontSize: "1.02rem", fontWeight: 700, lineHeight: 1.3, color: "var(--text-main)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" };
-  const homeCompactLine: React.CSSProperties = { margin: 0, padding: "12px 14px", borderRadius: "14px", background: "var(--surface)", border: "1px solid var(--border)", fontSize: "0.9rem", fontWeight: 600, color: "var(--text-muted)", overflowWrap: "anywhere" };
-  const homeCtaPrimary: React.CSSProperties = { width: "100%", minHeight: "48px", padding: "12px 16px", borderRadius: "14px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.02rem", fontWeight: 800, cursor: "pointer" };
-  const homeCtaSecondary: React.CSSProperties = { ...homeCtaPrimary, background: "var(--primary-light)", color: "var(--primary)" };
-  const homeCta = (isPrimary: boolean) => (isPrimary ? homeCtaPrimary : homeCtaSecondary);
-  const homeThumb = (size: number): React.CSSProperties => ({ width: size, height: size, borderRadius: "12px", overflow: "hidden", flexShrink: 0, background: "var(--bg)" });
-
   // --- ANALYTICS: HOME VIEWED ---
   useEffect(() => {
+    if (!userStateRestored) return;
     if (activeView === "home") {
       const key = `home_viewed_${dueReviewCount}_${dailyArticle?.id || 'none'}_${continueTarget?.id || 'none'}`;
       if (!analyticsFiredRef.current[key]) {
@@ -1856,7 +1774,7 @@ export default function FuragoApp({
         analyticsFiredRef.current[key] = true;
       }
     }
-  }, [activeView, dueReviewCount, dailyArticle, continueTarget, streakStatus.state]);
+  }, [userStateRestored, activeView, dueReviewCount, dailyArticle, continueTarget, streakStatus.state]);
 
   // --- ANALYTICS: SRS SESSION COMPLETED ---
   useEffect(() => {
@@ -1875,99 +1793,6 @@ export default function FuragoApp({
     }
   }, [activeView, vocabReviewIndex, vocabReviewWords.length, vocabReviewCorrectCount]);
 
-  // Render interactive French paragraph with clickable words and TTS highlight
-  const renderInteractiveContent = (paragraphs: Paragraph[]) => {
-    let globalOffset = 0;
-    const allElements: React.ReactNode[] = [];
-
-    const sentenceItem = ttsQueue[queueIndex];
-    let sentenceStart = -1;
-    let sentenceEnd = -1;
-    if (sentenceItem) {
-      sentenceStart = sentenceItem.start;
-      sentenceEnd = sentenceItem.start + sentenceItem.length;
-    }
-
-    paragraphs.forEach((p, pIdx) => {
-      const text = p.fr;
-      const elements: React.ReactNode[] = [];
-      const tokenRegex = /([a-zA-ZÀ-ÿœæŒÆ]+(?:['’][a-zA-ZÀ-ÿœæŒÆ]+)?)|([^a-zA-ZÀ-ÿœæŒÆ]+)/g;
-      let match;
-
-      while ((match = tokenRegex.exec(text)) !== null) {
-        const token = match[0];
-        const startIdx = globalOffset;
-        const endIdx = globalOffset + token.length;
-
-        const isWord = /[a-zA-ZÀ-ÿœæŒÆ]/.test(token);
-        let isHighlighted = false;
-        let isDimmed = false;
-
-        if (sentenceStart !== -1 && sentenceEnd !== -1) {
-          if (startIdx >= sentenceStart && startIdx < sentenceEnd) {
-            isHighlighted = true;
-          } else {
-            isDimmed = true;
-          }
-        }
-
-        if (isWord) {
-          elements.push(
-            <button
-              type="button"
-              key={startIdx}
-              onClick={(e) => handleWordClick(e, token, text)}
-              style={{
-                cursor: "pointer",
-                transition: "all 0.15s",
-                color: isHighlighted ? "var(--primary)" : isDimmed ? "var(--text-muted)" : "inherit",
-                opacity: isDimmed ? 0.6 : 1,
-                backgroundColor:
-                  isHighlighted &&
-                  highlightRange.length > 0 &&
-                  startIdx >= highlightRange.start &&
-                  startIdx < highlightRange.start + highlightRange.length
-                    ? "rgba(0, 122, 255, 0.15)"
-                    : "transparent",
-                borderRadius: "4px",
-              }}
-              className="hover-word reset-button interactive-word"
-            >
-              {token}
-            </button>
-          );
-        } else {
-          elements.push(
-            <span
-              key={startIdx}
-              style={{
-                color: isHighlighted ? "inherit" : isDimmed ? "var(--text-muted)" : "inherit",
-                opacity: isDimmed ? 0.6 : 1,
-              }}
-            >
-              {token}
-            </span>
-          );
-        }
-
-        globalOffset += token.length;
-      }
-      
-      const transText = appLang === 'ja' ? p.ja : p.en;
-      allElements.push(
-        <div key={p.id || pIdx} style={{ marginBottom: "1.2rem", position: "relative" }}>
-          <p lang="fr" style={{ margin: 0 }}>
-             {elements}
-          </p>
-        </div>
-      );
-      
-      globalOffset += 1;
-    });
-    
-    return allElements;
-  };
-
   const currentLevelData =
     currentArticle && currentArticle.levels
       ? currentArticle.levels[globalLevel]
@@ -1983,248 +1808,115 @@ export default function FuragoApp({
   const dueRemaining = vocabReviewSource === "learned"
     ? getWordsDueForReview(learnedWords, nowMs).length
     : 0;
+  const isReadingComplete = Boolean(
+    (currentLevelData?.quiz && currentLevelData.quiz.length > 0 && quizIndex >= currentLevelData.quiz.length) || noQuizCompleted
+  );
+  const readingCompletionStats = activeView === "reading" && isReadingComplete
+    ? getReviewStats(learnedWords, nowMs)
+    : null;
 
-  const renderCompletionScreen = () => {
-    const hasQuiz = currentLevelData?.quiz && currentLevelData.quiz.length > 0;
-    const sInfo = currentSeriesInfo;
-    const nextArticle = getNextArticleFor(currentArticle);
+  // Vocab review completion CTAs: destinations resolved here, presentation stays in VocabReviewView.
+  const vocabReviewPrimaryAction: VocabReviewAction = dueRemaining > 0
+    ? {
+        label: appLang === "ja" ? `🔄 復習を続ける (+${Math.min(5, dueRemaining)})` : `🔄 Continue review (+${Math.min(5, dueRemaining)})`,
+        onClick: () => {
+          checkAndAwardVocabReviewXP();
+          startVocabReview("learned", vocabReviewReturnTo);
+        },
+      }
+    : vocabReviewReturnTo === "reading"
+      ? nextRewardEp
+        ? {
+            label: appLang === "ja" ? "📖 次のエピソード" : "📖 Next Episode",
+            onClick: () => {
+              checkAndAwardVocabReviewXP();
+              if (nextRewardEp) openArticle(nextRewardEp);
+            },
+          }
+        : nextRewardArticle
+          ? {
+              label: appLang === "ja" ? "📖 次の記事" : "📖 Next Article",
+              onClick: () => {
+                checkAndAwardVocabReviewXP();
+                if (nextRewardArticle) openArticle(nextRewardArticle);
+              },
+            }
+          : {
+              label: appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home",
+              onClick: () => {
+                checkAndAwardVocabReviewXP();
+                navigateTo("home");
+              },
+            }
+      : vocabReviewReturnTo === "home"
+        ? continueTarget
+          ? {
+              label: continueArticle
+                ? (appLang === "ja" ? "📖 続きを読む" : "📖 Continue reading")
+                : (appLang === "ja" ? "📖 次のエピソードへ" : "📖 Next episode"),
+              onClick: () => {
+                checkAndAwardVocabReviewXP();
+                trackEvent("home_cta_clicked", { cta_type: "continue", position: 1 });
+                if (continueTarget) openArticle(continueTarget, false, "home_continue");
+              },
+            }
+          : dailyArticle && !isMissionCompletedToday
+            ? {
+                label: appLang === "ja" ? "🎯 今日のミッションを読む" : "🎯 Today's mission",
+                onClick: () => {
+                  checkAndAwardVocabReviewXP();
+                  trackEvent("home_cta_clicked", { cta_type: "mission", position: 2 });
+                  if (dailyArticle) openArticle(dailyArticle, false, "home_mission");
+                },
+              }
+            : {
+                label: appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home",
+                onClick: () => {
+                  checkAndAwardVocabReviewXP();
+                  navigateTo("home");
+                },
+              }
+        : {
+            label: appLang === "ja" ? "単語帳に戻る" : "Back to Vocabulary",
+            onClick: () => {
+              checkAndAwardVocabReviewXP();
+              handleBack("words");
+            },
+          };
 
-    return (
-      <div className="quiz-card fade-in" style={{ textAlign: "center", padding: "32px 24px" }}>
-        <h2 style={{ fontSize: "1.5rem", marginBottom: "24px", color: "var(--text-main)", fontWeight: 800 }}>
-          {appLang === "ja" ? "🎉 記事を完了しました" : "🎉 Article Completed"}
-        </h2>
-        
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "28px", background: "var(--bg)", padding: "16px 20px", borderRadius: "16px", textAlign: "left" }}>
-          {hasQuiz && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "スコア" : "Score"}</span>
-              <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>{quizScore} / {currentLevelData.quiz?.length}</span>
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "獲得 XP" : "Earned XP"}</span>
-            <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "var(--primary)" }}>
-              {sessionReward === null ? "..." : `+${sessionReward.xp} XP`}
-            </span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{t.progress.streak}</span>
-            <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "#ff9500" }}>🔥 {streakStatus.display} {t.progress.days}</span>
-          </div>
-          {sessionReward !== null && sessionReward.vocab > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
-              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "新出単語" : "New Words"}</span>
-              <span style={{ fontWeight: 800, fontSize: "1.1rem" }}>📚 {sessionReward.vocab} {appLang === 'ja' ? '件' : 'items'}</span>
-            </div>
-          )}
-          {(() => {
-             const stats = getReviewStats(learnedWords, nowMs);
-             if (stats.dueToday > 0) {
-               return (
-                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
-                   <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>{appLang === "ja" ? "復習待ち" : "Due for Review"}</span>
-                   <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "var(--primary)" }}>🔄 {stats.dueToday} {appLang === 'ja' ? '件' : 'items'}</span>
-                 </div>
-               );
-             }
-             return null;
-          })()}
-        </div>
+  const vocabReviewSecondaryAction: VocabReviewAction | null =
+    dueRemaining > 0
+      ? vocabReviewReturnTo === "words"
+        ? {
+            label: appLang === "ja" ? "単語帳に戻る" : "Back to Vocabulary",
+            onClick: () => {
+              checkAndAwardVocabReviewXP();
+              handleBack("words");
+            },
+          }
+        : {
+            label: appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home",
+            onClick: () => {
+              checkAndAwardVocabReviewXP();
+              navigateTo("home");
+            },
+          }
+      : (vocabReviewReturnTo === "reading" && (nextRewardEp || nextRewardArticle)) ||
+          (vocabReviewReturnTo === "home" && (continueTarget || (dailyArticle && !isMissionCompletedToday))) ||
+          vocabReviewReturnTo === "words"
+        ? {
+            label: appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home",
+            onClick: () => {
+              checkAndAwardVocabReviewXP();
+              navigateTo("home");
+            },
+          }
+        : null;
 
-        {currentArticle?.seriesId && sInfo && (
-          <div style={{ marginBottom: "28px", padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", background: "var(--bg)" }}>
-            <p style={{ margin: "0 0 6px 0", fontSize: "0.95rem", color: "var(--primary)", fontWeight: 800 }}>
-              {currentArticle.seriesId.replace(/_/g, ' ')}
-            </p>
-            <p style={{ margin: "0", fontWeight: 700, color: "var(--text-main)" }}>
-              Article {sInfo.currentIndex + 1} / {sInfo.total}
-            </p>
-          </div>
-        )}
-
-        {(() => {
-          const stats = getReviewStats(learnedWords, nowMs);
-          const hasVocabToReview = (sessionReward !== null && sessionReward.vocab > 0) || stats.dueToday > 0;
-          
-          return (
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {hasVocabToReview && (
-                <button
-                  type="button"
-                  onClick={() => startVocabReview("learned", "reading")}
-                  style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
-                >
-                  🔄 {appLang === "ja" ? "単語を復習する" : "Review Vocabulary"}
-                </button>
-              )}
-
-              {currentArticle?.seriesId ? (
-                quizNextEp ? (
-                  <button
-                    onClick={() => openArticle(quizNextEp)}
-                    style={{ width: "100%", padding: "14px", borderRadius: "16px", border: hasVocabToReview ? "2px solid var(--primary)" : "none", background: hasVocabToReview ? "var(--bg)" : "var(--primary)", color: hasVocabToReview ? "var(--primary)" : "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-                  >
-                    {appLang === "ja" ? "次のエピソード" : "Next Episode"}
-                  </button>
-                ) : (
-                  <div style={{ width: "100%", padding: "14px", borderRadius: "16px", background: "rgba(76, 217, 100, 0.15)", color: "#2e7d32", fontSize: "1.05rem", fontWeight: 800, textAlign: "center", display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <span style={{ fontSize: '1.1rem' }}>{appLang === "ja" ? "🏆 シリーズ完了" : "🏆 Series Completed"}</span>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{appLang === "ja" ? "このシリーズのすべてのエピソードを読み終えました。" : "You have finished all episodes in this series."}</span>
-                  </div>
-                )
-              ) : (
-                <button
-                  onClick={() => {
-                    if (nextArticle) {
-                      openArticle(nextArticle);
-                    } else {
-                      navigateTo("home");
-                    }
-                  }}
-                  style={{ width: "100%", padding: "14px", borderRadius: "16px", border: hasVocabToReview ? "2px solid var(--primary)" : "none", background: hasVocabToReview ? "var(--bg)" : "var(--primary)", color: hasVocabToReview ? "var(--primary)" : "white", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-                >
-                  {appLang === "ja" ? "次の記事" : "Next Article"}
-                </button>
-              )}
-              
-              <button
-                onClick={() => {
-                  handleBack("home");
-                }}
-                style={{ width: "100%", padding: "14px", borderRadius: "16px", border: "none", background: "var(--bg)", color: "var(--text-main)", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer" }}
-              >
-                {appLang === "ja" ? "ホームへ戻る" : "Back to Home"}
-              </button>
-            </div>
-          );
-        })()}
-      </div>
-    );
-  };
-
-  // --- 6.3-B: HABIT LAYER (streak nudge + daily habit summary) ---
-  const runHabitNudgeAction = () => {
-    trackEvent("home_cta_clicked", { cta_type: "habit_nudge", position: 0 });
-    if (nextBestActionType === "review") {
-      startVocabReview("learned", "home");
-    } else if (nextBestActionType === "continue" && continueTarget) {
-      openArticle(continueTarget, false, "home_continue");
-    } else if (nextBestActionType === "mission" && dailyArticle) {
-      openArticle(dailyArticle, false, "home_mission");
-    } else {
-      const el = document.getElementById("home-reco") || document.getElementById("home-catalog");
-      if (el) el.scrollIntoView({ behavior: "smooth" });
-    }
-  };
-
-  const renderHomeProgressWidget = () => {
-    const progressInfo = derivePedagogicalProgress(userState);
-
-    if (!progressInfo) {
-      return (
-        <section aria-labelledby="home-progress-widget" style={{ ...homeCard, padding: "16px", marginBottom: "24px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-            <h2 id="home-progress-widget" style={{ fontSize: "1.2rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-              {t.progress.title}
-            </h2>
-          </div>
-          <div style={{ textAlign: "center", padding: "12px", background: "var(--bg)", borderRadius: "12px" }}>
-            <span style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 600 }}>
-              {t.progress.empty}
-            </span>
-          </div>
-        </section>
-      );
-    }
-
-    const goal = progressInfo.goal;
-    const goalText = goal ? getGoalText(appLang, goal) : null;
-
-    return (
-      <section aria-labelledby="home-progress-widget" style={{ ...homeCard, padding: "16px", marginBottom: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <h2 id="home-progress-widget" style={{ fontSize: "1.2rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-            {t.progress.title}
-          </h2>
-          <button 
-            onClick={() => navigateTo("progress")}
-            className="reset-button"
-            style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--primary)", cursor: "pointer" }}
-          >
-            {t.progress.viewDetails}
-          </button>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
-          <div style={{ background: "var(--bg)", padding: "12px", borderRadius: "12px" }}>
-            <div style={{ fontSize: "1.4rem", fontWeight: 900, color: "var(--primary)" }}>{progressInfo.vocabulary.wordsConsolidated}</div>
-            <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-muted)" }}>
-              {t.progress.consolidatedWords}
-            </div>
-          </div>
-          <div style={{ background: "var(--bg)", padding: "12px", borderRadius: "12px" }}>
-            <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "var(--text-main)" }}>
-              {progressInfo.reading.highestCompletedContentLevel ? (t.levels[progressInfo.reading.highestCompletedContentLevel as keyof typeof t.levels] || progressInfo.reading.highestCompletedContentLevel) : t.progress.levelNotSet}
-            </div>
-            <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-muted)" }}>
-              {t.progress.currentLevel}
-            </div>
-          </div>
-        </div>
-
-        {goal ? (
-          <div style={{ background: "linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%)", padding: "16px", borderRadius: "12px", color: "white" }}>
-            <div style={{ fontSize: "0.85rem", fontWeight: 700, opacity: 0.9, marginBottom: "4px" }}>
-              {t.progress.currentGoal}
-            </div>
-            <div style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: "12px" }}>
-              {goalText?.title}
-            </div>
-            
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
-              <div style={{ flex: 1, background: "rgba(255,255,255,0.3)", height: "6px", borderRadius: "3px", overflow: "hidden" }}>
-                <div style={{ width: `${Math.round(goal.progressRatio * 100)}%`, height: "100%", background: "white", borderRadius: "3px" }} />
-              </div>
-              <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>
-                {goal.current} / {goal.target}
-              </span>
-            </div>
-
-            <button
-              onClick={() => {
-                if (goal.category === "VOCABULARY" || goal.category === "CONSOLIDATION") {
-                  navigateTo("words");
-                } else if (goal.category === "READING" || goal.category === "QUIZ") {
-                  let targetArticle = recommendedArticles[0];
-                  if (goal.category === "QUIZ") {
-                    targetArticle = articles.find(a => !completedArticleIds.some((entry) => completedArticleId(entry) === String(a.id)) && a.levels[globalLevel]?.quiz && a.levels[globalLevel]?.quiz!.length > 0) || targetArticle;
-                  }
-                  if (targetArticle) {
-                    openArticle(targetArticle, false, "home_progress_widget");
-                  } else {
-                    const el = document.getElementById("home-reco") || document.getElementById("home-catalog") || window.document.body;
-                    if (el) el.scrollIntoView({ behavior: "smooth" });
-                  }
-                }
-              }}
-              style={{ width: "100%", padding: "12px", borderRadius: "12px", background: "white", color: "var(--primary)", fontWeight: 800, border: "none", cursor: "pointer" }}
-            >
-              {goal.category === "VOCABULARY" || goal.category === "CONSOLIDATION" 
-                ? t.progress.goalCtaReview
-                : t.progress.goalCtaRead}
-            </button>
-          </div>
-        ) : (
-          <div style={{ textAlign: "center", padding: "12px", background: "var(--bg)", borderRadius: "12px" }}>
-            <span style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 600 }}>
-              {t.progress.goalEmpty}
-            </span>
-          </div>
-        )}
-      </section>
-    );
-  };
+  const openFilterModal = useCallback((type: "level" | "category", trigger: HTMLButtonElement | null) => {
+    filterTriggerRef.current = trigger;
+    setFilterModalType(type);
+  }, []);
 
   return (
     <div className="app-shell">
@@ -2249,11 +1941,11 @@ export default function FuragoApp({
 
       {/* Top Bar - Capture d'emails (Lead Generation) */}
       {showLeadBar && (
-        <div className="lead-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--primary)', color: 'white', padding: '10px 16px', gap: '12px', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 700, whiteSpace: "nowrap", fontSize: '0.95rem' }}>
+        <div className="lead-bar">
+          <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
             {t.nav.leadBarText}
           </span>
-          <form className="lead-bar-form" onSubmit={(e) => { e.preventDefault(); handleOpenLeadModal(e); }} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <form className="lead-bar-form" onSubmit={(e) => { e.preventDefault(); handleOpenLeadModal(e); }}>
             <input
               type="email"
               value={leadEmail}
@@ -2261,9 +1953,8 @@ export default function FuragoApp({
               placeholder="e.g. taro@furago.com"
               aria-label={t.common.email}
               className="lead-bar-input"
-              style={{ padding: '6px 12px', borderRadius: '16px', border: 'none', outline: 'none', fontSize: '0.85rem' }}
             />
-            <button type="submit" className="lead-bar-btn" style={{ background: 'white', color: 'var(--primary)', border: 'none', borderRadius: '16px', padding: '6px 12px', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem' }}>
+            <button type="submit" className="lead-bar-btn">
               {t.nav.leadBarBtn}
             </button>
             <button
@@ -2273,7 +1964,7 @@ export default function FuragoApp({
               style={{
                 background: "transparent",
                 border: "none",
-                color: "rgba(255,255,255,0.8)",
+                color: "var(--text-muted)",
                 cursor: "pointer",
                 padding: "2px 4px",
                 fontSize: "1.2rem",
@@ -2358,1669 +2049,161 @@ export default function FuragoApp({
         </div>
       </header>
 
-      {/* VIEW 1: HOME (記事一覧) */}
+      {/* VIEW 1: HOME (redesigned 6.3-D.2-B) */}
       {activeView === "home" && (
-        <main className="view fade-in">
-          <div className="filters-bar">
-            <button
-              className="filter-btn"
-              onClick={(e) => {
-                filterTriggerRef.current = e.currentTarget;
-                setFilterModalType("level");
-              }}
-            >
-              {t.nav.level} : {t.levels[globalLevel as keyof typeof t.levels] || globalLevel}
-            </button>
-            <button
-              className="filter-btn"
-              onClick={(e) => {
-                filterTriggerRef.current = e.currentTarget;
-                setFilterModalType("category");
-              }}
-            >
-              {selectedCategories.length === allCategories.length ||
-              selectedCategories.length === 0
-                ? t.nav.category
-                : `${t.nav.category} (${selectedCategories.length})`}
-            </button>
-          </div>
-
-          <div style={{ padding: '16px 16px 0', maxWidth: '100%', boxSizing: 'border-box' }}>
-            {/* 6.3-B: habit layer — streak nudge + daily habit summary */}
-            {streakStatus.state !== "none" && (
-              <section
-                data-testid="habit-nudge"
-                data-state={streakStatus.state}
-                aria-live="polite"
-                style={{
-                  marginBottom: 12,
-                  padding: "12px 14px",
-                  borderRadius: 14,
-                  border: `1px solid ${streakStatus.state === "done_today" ? "var(--border)" : "var(--primary)"}`,
-                  background: streakStatus.state === "done_today" ? "var(--surface)" : "var(--primary-light)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                  <span aria-hidden="true" style={{ fontSize: "1rem", lineHeight: 1.4 }}>
-                    {streakStatus.state === "done_today" ? "✓" : "🔥"}
-                  </span>
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ margin: 0, fontSize: "0.92rem", fontWeight: 800, color: "var(--text-main)" }}>
-                      {streakStatus.state === "done_today"
-                        ? t.habit.doneTodayTitle
-                        : streakStatus.state === "broken"
-                          ? t.habit.brokenTitle
-                          : t.habit.atRiskTitle}
-                    </p>
-                    <p style={{ margin: "2px 0 0", fontSize: "0.85rem", fontWeight: 600, color: "var(--text-muted)", overflowWrap: "anywhere" }}>
-                      {(streakStatus.state === "done_today"
-                        ? t.habit.doneTodayBody
-                        : streakStatus.state === "broken"
-                          ? t.habit.brokenBody
-                          : t.habit.atRiskBody
-                      ).replace("{streak}", String(streakStatus.display))}
-                    </p>
-                  </div>
-                </div>
-                {streakStatus.state !== "done_today" && (
-                  <button
-                    type="button"
-                    onClick={runHabitNudgeAction}
-                    style={{ ...homeCtaPrimary, minHeight: 44 }}
-                  >
-                    {nextBestActionType === "review"
-                      ? t.habit.ctaReview
-                      : nextBestActionType === "continue"
-                        ? t.habit.ctaContinue
-                        : nextBestActionType === "mission"
-                          ? t.habit.ctaMission
-                          : t.habit.ctaExplore}
-                  </button>
-                )}
-              </section>
-            )}
-            <section
-              data-testid="habit-summary"
-              aria-label={t.habit.title}
-              style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap" }}
-            >
-              <div
-                data-habit="mission"
-                data-done={isMissionCompletedToday ? "true" : "false"}
-                aria-label={`${t.habit.mission}: ${isMissionCompletedToday ? t.habit.statusDone : t.habit.statusPending}`}
-                style={{
-                    flex: "1 1 100px",
-                    minWidth: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    padding: "8px 6px",
-                    borderRadius: 12,
-                    border: `1px solid ${isMissionCompletedToday ? "var(--primary)" : "var(--border)"}`,
-                    background: isMissionCompletedToday ? "var(--surface)" : "var(--bg)",
-                    color: isMissionCompletedToday ? "var(--primary)" : "var(--text-muted)",
-                    fontSize: "0.78rem",
-                    fontWeight: 700,
-                    textAlign: "center"
-                  }}
-              >
-                <span aria-hidden="true">{isMissionCompletedToday ? "✓" : "○"}</span>
-                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{t.habit.mission}</span>
-              </div>
-              <div
-                data-habit="review"
-                data-done={isVocabReviewCompletedToday ? "true" : "false"}
-                aria-label={`${t.habit.review}: ${isVocabReviewCompletedToday ? t.habit.statusDone : t.habit.statusPending}`}
-                style={{
-                    flex: "1 1 100px",
-                    minWidth: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    padding: "8px 6px",
-                    borderRadius: 12,
-                    border: `1px solid ${isVocabReviewCompletedToday ? "var(--primary)" : "var(--border)"}`,
-                    background: isVocabReviewCompletedToday ? "var(--surface)" : "var(--bg)",
-                    color: isVocabReviewCompletedToday ? "var(--primary)" : "var(--text-muted)",
-                    fontSize: "0.78rem",
-                    fontWeight: 700,
-                    textAlign: "center"
-                  }}
-              >
-                <span aria-hidden="true">{isVocabReviewCompletedToday ? "✓" : "○"}</span>
-                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{t.habit.review}</span>
-              </div>
-              <div
-                data-habit="learningDay"
-                data-done={lastStreakDate === todayStr ? "true" : "false"}
-                aria-label={`${t.habit.learningDay}: ${lastStreakDate === todayStr ? t.habit.statusDone : t.habit.statusPending}`}
-                style={{
-                    flex: "1 1 100px",
-                    minWidth: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    padding: "8px 6px",
-                    borderRadius: 12,
-                    border: `1px solid ${lastStreakDate === todayStr ? "var(--primary)" : "var(--border)"}`,
-                    background: lastStreakDate === todayStr ? "var(--surface)" : "var(--bg)",
-                    color: lastStreakDate === todayStr ? "var(--primary)" : "var(--text-muted)",
-                    fontSize: "0.78rem",
-                    fontWeight: 700,
-                    textAlign: "center"
-                  }}
-              >
-                <span aria-hidden="true">{lastStreakDate === todayStr ? "✓" : "○"}</span>
-                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{t.habit.learningDay}</span>
-              </div>
-            </section>
-            {/* B. CONTINUER — real in-progress article (or next episode of a finished series) */}
-            {continueTarget && (
-              <section aria-labelledby="home-continue">
-                <h2 id="home-continue" style={homeSectionLabel}>
-                  {continueArticle ? t.home.continueTitle : t.home.continueSeriesTitle}
-                </h2>
-                <div style={homeCard}>
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', minWidth: 0 }}>
-                    {continueTarget.imageUrl && (
-                      <div style={homeThumb(64)}>
-                        <img src={formatDriveUrl(continueTarget.imageUrl)} alt="" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      </div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <h3 lang="fr" style={homeTitle}>{getArticleTitle(continueTarget)}</h3>
-                      <p style={homeMeta}>
-                        {[
-                          t.levels[globalLevel as keyof typeof t.levels],
-                          getCategoryLabel(continueTarget),
-                          !continueArticle && continueTarget.seriesOrder ? t.home.episode.replace("{n}", String(continueTarget.seriesOrder)) : '',
-                        ].filter(Boolean).join(' · ')}
-                      </p>
-                    </div>
-                  </div>
-                  {continueArticle && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px' }}>
-                      <div
-                        role="progressbar"
-                        aria-label={t.home.readingProgress}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={continuePercent}
-                        style={{ flex: 1, height: '6px', borderRadius: '6px', background: 'var(--bg)', overflow: 'hidden' }}
-                      >
-                        <div style={{ width: `${continuePercent}%`, height: '100%', background: 'var(--primary)' }} />
-                      </div>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--primary)', minWidth: '4ch', textAlign: 'right' }}>
-                        {continuePercent}%
-                      </span>
-                    </div>
-                  )}
-                  {missionIsContinue && !isMissionCompletedToday && (
-                    <p style={{ ...homeMeta, color: 'var(--primary)', fontWeight: 700, marginTop: '10px' }}>
-                      {t.home.missionTag}
-                    </p>
-                  )}
-                  <button onClick={() => {
-                    trackEvent("home_cta_clicked", { cta_type: "continue", position: 1 });
-                    openArticle(continueTarget, false, "home_continue");
-                  }} style={{ ...homeCta(nextBestActionType === 'continue'), marginTop: '12px' }}>
-                    {continueArticle ? t.home.continueCta : t.home.nextEpisodeCta}
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {/* C. À RÉVISER — count comes from getWordsDueForReview (real SRS) */}
-            <section aria-labelledby="home-review">
-              <h2 id="home-review" style={homeSectionLabel}>{t.home.reviewSection}</h2>
-              {dueReviewCount > 0 ? (
-                <div style={{ ...homeCard, display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                  <div style={{ flex: '1 1 150px', minWidth: 0 }}>
-                    <p style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                      {(dueReviewCount === 1 ? t.home.reviewDueOne : t.home.reviewDue).replace("{count}", String(dueReviewCount))}
-                    </p>
-                    <p style={homeMeta}>{t.home.reviewBeforeForget}</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      trackEvent("home_cta_clicked", { cta_type: "srs", position: 2 });
-                      startVocabReview("learned", "home");
-                    }}
-                    style={{ ...homeCta(nextBestActionType === 'review'), width: 'auto', flex: '0 0 auto', padding: '12px 22px' }}
-                  >
-                    {t.home.reviewCta}
-                  </button>
-                </div>
-              ) : (
-                <p style={homeCompactLine}>
-                  {learnedWords.length === 0
-                    ? t.home.reviewEmptyNoWords
-                    : nextReviewOffset === 0
-                      ? t.home.reviewNoneLaterToday
-                      : nextReviewOffset === 1
-                        ? t.home.reviewNoneTomorrow
-                        : nextReviewOffset !== null
-                          ? t.home.reviewNoneInDays.replace("{days}", String(nextReviewOffset))
-                          : t.home.reviewNone}
-                </p>
-              )}
-              {savedWords.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    trackEvent("home_cta_clicked", { cta_type: "srs", position: 3 });
-                    startVocabReview("saved", "home");
-                  }}
-                  style={{ background: 'none', border: 'none', padding: '8px 2px', minHeight: '44px', color: 'var(--primary)', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer', textAlign: 'left' }}
-                >
-                  {t.home.practiceSaved.replace("{count}", String(savedWords.length))}
-                </button>
-              )}
-            </section>
-
-            {/* D. MISSION DU JOUR — existing daily mission (dailyArticle + dailyMissionCompletedDate) */}
-            {dailyArticle && (
-              <section aria-labelledby="home-mission">
-                <h2 id="home-mission" style={homeSectionLabel}>{t.home.missionSection}</h2>
-                {isMissionCompletedToday ? (
-                  <p style={{ ...homeCompactLine, color: '#2e7d32', background: 'var(--green-light)', borderColor: 'transparent' }}>
-                    {t.home.missionComplete}
-                  </p>
-                ) : missionIsContinue ? (
-                  <p style={homeCompactLine}>
-                    {t.home.missionContinueHint}
-                  </p>
-                ) : (
-                  <div style={homeCard}>
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', minWidth: 0 }}>
-                      {dailyArticle.imageUrl && (
-                        <div style={homeThumb(56)}>
-                          <img src={formatDriveUrl(dailyArticle.imageUrl)} alt="" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        </div>
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: '0 0 4px', fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary)' }}>
-                          {t.home.missionFinish}
-                        </p>
-                        <h3 lang="fr" style={homeTitle}>{getArticleTitle(dailyArticle)}</h3>
-                        <p style={homeMeta}>{t.home.missionMeta}</p>
-                      </div>
-                    </div>
-                    <button onClick={() => {
-                      trackEvent("home_cta_clicked", { cta_type: "mission", position: 2 });
-                      openArticle(dailyArticle, false, "home_mission");
-                    }} style={{ ...homeCta(nextBestActionType === 'mission'), marginTop: '12px' }}>
-                      {t.reading.read}
-                    </button>
-                  </div>
-                )}
-              </section>
-            )}
-
-            
-            {/* WIDGET PROGRESSION (6.2-D) */}
-            {renderHomeProgressWidget()}
-            
-{/* E. RECOMMANDÉ — not completed, newest first, one per category first */}
-            {recommendedArticles.length > 0 && (
-              <section aria-labelledby="home-reco">
-                <h2 id="home-reco" style={homeSectionLabel}>{t.home.recommended}</h2>
-                <ul style={{ ...homeCard, listStyle: 'none', margin: 0, padding: '2px 12px' }}>
-                  {recommendedArticles.map((a, i) => (
-                    <li key={a.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          trackEvent("home_cta_clicked", { cta_type: "recommendation", position: 3 + i });
-                          openArticle(a, false, "recommendation");
-                        }}
-                        style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', minWidth: 0, padding: '10px 0', background: 'none', border: 'none', borderTop: i === 0 ? 'none' : '1px solid var(--border)', cursor: 'pointer', textAlign: 'left', color: 'inherit', font: 'inherit' }}
-                      >
-                        {a.imageUrl ? (
-                          <span style={{ ...homeThumb(52), display: 'block' }}>
-                            <img src={formatDriveUrl(a.imageUrl)} alt="" loading="lazy" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          </span>
-                        ) : null}
-                        <span style={{ flex: 1, minWidth: 0, display: 'block' }}>
-                          <span lang="fr" style={{ ...homeTitle, fontSize: '0.97rem' }}>{getArticleTitle(a)}</span>
-                          {getCategoryLabel(a) && <span style={{ ...homeMeta, display: 'block' }}>{getCategoryLabel(a)}</span>}
-                        </span>
-                        <span aria-hidden="true" style={{ color: 'var(--text-muted)', fontSize: '1.3rem', flexShrink: 0 }}>›</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)', margin: '28px 0 12px' }}>
-              {t.home.allArticles}
-            </h2>
-          </div>
-
-          {catalogStatus === "loading" ? (
-            <p style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-muted)" }}>
-              {t.home.loading}
-            </p>
-          ) : catalogStatus === "error" ? (
-            <div style={{ textAlign: "center", padding: "40px 20px" }}>
-              <p style={{ color: "var(--text-muted)", marginBottom: "16px" }}>
-                {t.home.loadError}
-              </p>
-              <button 
-                onClick={() => window.location.reload()}
-                style={{ padding: "10px 20px", background: "var(--primary)", color: "white", borderRadius: "10px", border: "none", fontWeight: "bold", cursor: "pointer" }}
-              >
-                {t.home.retry}
-              </button>
-            </div>
-          ) : filteredArticles.length === 0 ? (
-            <p style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-muted)" }}>
-              {t.home.emptyResult}
-            </p>
-          ) : (
-            <ul className="article-list">
-              {filteredArticles.map((article, index) => {
-                const levelData = article.levels[globalLevel];
-                const displayTitle = levelData?.title || article.originalTitle;
-                const imgUrl = formatDriveUrl(article.imageUrl);
-                const dateFormatted = article.date
-                  ? new Date(article.date).toLocaleDateString(appLang === "ja" ? "ja-JP" : "en-US")
-                  : "";
-
-                return (
-                  <li key={article.id || index} style={{ padding: 0, margin: 0 }}>
-                    <button
-                      type="button"
-                      onClick={() => openArticle(article, false, "catalog")}
-                      className={`article-card fade-in reset-button ${
-                        index === 0 ? "hero-format" : "list-format"
-                      }`}
-                      style={{ width: "100%", textAlign: "left", display: "flex" }}
-                    >
-                    {imgUrl && (
-                      <div className="article-image-container">
-                        <img
-                          src={imgUrl}
-                          alt={typeof displayTitle === "string" ? displayTitle : displayTitle?.fr || ""}
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            const id = extractDriveId(article.imageUrl);
-                            const fallback = id
-                              ? `https://drive.google.com/thumbnail?id=${id}&sz=w1000`
-                              : "";
-                            if (fallback && e.currentTarget.src !== fallback) {
-                              e.currentTarget.src = fallback;
-                            }
-                          }}
-                        />
-                      </div>
-                    )}
-                    <div className="article-card-content">
-                      <h3 lang="fr">{typeof displayTitle === "string" ? displayTitle : displayTitle?.fr}</h3>
-                      <p
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          margin: 0,
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span className="badge">{globalLevel}</span>
-                        <span
-                          className="badge"
-                          style={{
-                            background: "var(--bg)",
-                            color: "var(--text-muted)",
-                            textTransform: "capitalize"
-                          }}
-                        >
-                          {typeof article.category === "string" ? article.category : (article.category?.[appLang] || article.category?.ja || "General")}
-                        </span>
-                        {dateFormatted && (
-                          <span
-                            style={{
-                              color: "var(--text-muted)",
-                              fontSize: "0.8rem",
-                              marginLeft: "auto",
-                            }}
-                          >
-                            {dateFormatted}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </main>
+        <HomeView
+          t={t}
+          appLang={appLang}
+          globalLevel={globalLevel}
+          onOpenFilterModal={openFilterModal}
+          selectedCategories={selectedCategories}
+          allCategories={allCategories}
+          catalogStatus={catalogStatus}
+          filteredArticles={filteredArticles}
+          articles={articles}
+          openArticle={openArticle}
+          startVocabReview={(source) => startVocabReview(source, "home")}
+          dueReviewCount={dueReviewCount}
+          nextReviewOffset={nextReviewOffset}
+          continueTarget={continueTarget}
+          continueArticle={continueArticle}
+          continuePercent={continuePercent}
+          dailyArticle={dailyArticle}
+          isMissionCompletedToday={isMissionCompletedToday}
+          missionIsContinue={missionIsContinue}
+          nextBestActionType={nextBestActionType}
+          recommendedArticles={recommendedArticles}
+          streakStatus={streakStatus}
+          lastStreakDate={lastStreakDate}
+          todayStr={todayStr}
+          isVocabReviewCompletedToday={isVocabReviewCompletedToday}
+          savedWords={savedWords}
+          learnedWords={learnedWords}
+          userState={userState}
+          navigateTo={navigateTo}
+          completedArticleIds={completedArticleIds}
+          getArticleTitle={getArticleTitle}
+          getCategoryLabel={getCategoryLabel}
+        />
       )}
 
       {/* VIEW 2: READING ARTICLE (記事閲覧 + 音声 + クイズ) */}
       {activeView === "reading" && currentArticle && currentLevelData && (
-        <main className="view reading-view fade-in">
-          {formatDriveUrl(currentArticle.imageUrl) && (
-            <div className="article-hero">
-              <img
-                src={formatDriveUrl(currentArticle.imageUrl)}
-                alt={typeof currentLevelData.title === "string" ? currentLevelData.title : currentLevelData.title?.fr}
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  const id = extractDriveId(currentArticle.imageUrl);
-                  const fallback = id
-                    ? `https://drive.google.com/thumbnail?id=${id}&sz=w1000`
-                    : "";
-                  if (fallback && e.currentTarget.src !== fallback) {
-                    e.currentTarget.src = fallback;
-                  }
-                }}
-              />
-            </div>
-          )}
+        <ReadingView
+          article={currentArticle}
+          levelData={currentLevelData}
+          globalLevel={globalLevel}
+          appLang={appLang}
+          t={t}
+          seriesProgress={currentSeriesInfo ? { currentIndex: currentSeriesInfo.currentIndex, total: currentSeriesInfo.total } : null}
+          onWordClick={handleWordClick}
+          renderVocabularyItem={(word, index) => <TargetVocabularyItem key={index} word={word} onClick={handleWordClick} />}
+          speechRange={ttsQueue[queueIndex] ? { start: ttsQueue[queueIndex].start, length: ttsQueue[queueIndex].length } : null}
+          highlightRange={highlightRange}
+          quizIndex={quizIndex}
+          selectedAnswer={selectedAnswer}
+          translatedQuizIds={translatedQuizIds}
+          onToggleQuestionTranslation={(questionId) => setTranslatedQuizIds((previous) => ({ ...previous, [questionId]: !previous[questionId] }))}
+          onSelectAnswer={(answerKey, isCorrect) => {
+            setSelectedAnswer(answerKey);
+            if (isCorrect) {
+              setQuizScore((score) => score + 1);
+            }
 
-          <div className="article-header">
-            {currentArticle.seriesId && (
-              (() => {
-                const sInfo = getSeriesInfo(currentArticle, globalLevel);
-                if (!sInfo) return null;
-                return (
-                  <p style={{ margin: "0 0 8px 0", fontSize: "0.95rem", color: "var(--primary)", fontWeight: 800 }}>
-                    {currentArticle.seriesId.replace(/_/g, ' ')} • {sInfo.currentIndex + 1} / {sInfo.total}
-                  </p>
-                );
-              })()
-            )}
-            <h2 lang="fr">{typeof currentLevelData.title === "string" ? currentLevelData.title : (currentLevelData.title as TranslatableText)?.fr}</h2>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                marginTop: "10px",
-              }}
-            >
-              <span className="badge" style={{ fontSize: "0.85rem" }}>
-                {t.levels[globalLevel as keyof typeof t.levels] || globalLevel}
-              </span>
-              <span
-                className="badge"
-                style={{
-                  background: "#E5E5EA",
-                  color: "#636366",
-                  fontSize: "0.85rem",
-                }}
-              >
-                {typeof currentArticle.category === "string" ? currentArticle.category : ((currentArticle.category as TranslatableText | undefined)?.[appLang] || (currentArticle.category as TranslatableText | undefined)?.ja || "General")}
-              </span>
-              {currentArticle.date && (
-                <span
-                  style={{
-                    color: "var(--text-muted)",
-                    fontSize: "0.85rem",
-                    marginLeft: "auto",
-                  }}
-                >
-                  {new Date(currentArticle.date).toLocaleDateString("ja-JP")}
-                </span>
-              )}
-            </div>
-            <p
-              style={{
-                fontSize: "0.8rem",
-                color: "var(--text-muted)",
-                marginTop: "10px",
-              }}
-            >
-              {t.reading.tapHint}
-            </p>
-          </div>
+            if (quizTimerRef.current) {
+              clearTimeout(quizTimerRef.current);
+            }
 
-          {/* Learning Layer */}
-          {currentLevelData.learningGoal && (
-             <div style={{ marginBottom: "20px", padding: "16px", borderRadius: "16px", background: "rgba(0, 122, 255, 0.05)" }}>
-               <h3 style={{ margin: "0 0 8px 0", fontSize: "1.05rem", color: "var(--primary)", fontWeight: 800 }}>
-                 {appLang === 'ja' ? 'この記事で学ぶこと' : 'What you will learn'}
-               </h3>
-               <p style={{ margin: "0", fontSize: "0.95rem", fontWeight: 600, color: "var(--text-main)", lineHeight: "1.5" }}>
-                 {typeof currentLevelData.learningGoal === 'string' 
-                   ? currentLevelData.learningGoal 
-                   : (currentLevelData.learningGoal as TranslatableText)[appLang === 'ja' ? 'ja' : 'en'] || (currentLevelData.learningGoal as TranslatableText).ja}
-               </p>
-             </div>
-          )}
-          {currentLevelData.targetVocabulary && currentLevelData.targetVocabulary.length > 0 && (
-             <div style={{ marginBottom: "32px", padding: "16px", borderRadius: "16px", background: "var(--bg)", border: "1px solid var(--border)" }}>
-               <h3 style={{ margin: "0 0 12px 0", fontSize: "1.05rem", color: "var(--text-main)", fontWeight: 800 }}>
-                 {appLang === 'ja' ? '今日の単語' : "Today's Vocabulary"}
-               </h3>
-               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                 {currentLevelData.targetVocabulary.slice(0, 5).map((word, i) => (
-                    <TargetVocabularyItem key={i} word={word} onClick={handleWordClick} />
-                 ))}
-               </div>
-             </div>
-          )}
-
-          <div className="article-content" lang="fr">
-            {renderInteractiveContent((currentLevelData.paragraphs || currentLevelData.segments || []))}
-          </div>
-
-          {/* Comprehension Quiz and Completion */}
-          {((currentLevelData.quiz && currentLevelData.quiz.length > 0 && quizIndex >= currentLevelData.quiz.length) || noQuizCompleted) ? (
-            <div className="quiz-section">
-              {renderCompletionScreen()}
-            </div>
-          ) : (currentLevelData.quiz && currentLevelData.quiz.length > 0) ? (
-            <div className="quiz-section">
-              <h3>🧠 {appLang === 'ja' ? '理解度チェック' : 'Comprehension Check'}</h3>
-              {(() => {
-                const q = currentLevelData.quiz[quizIndex];
-                let normalizedChoices: QuizChoice[] = [];
-                
-                if (q.choices) {
-                  normalizedChoices = q.choices;
-                } else if (Array.isArray(q.options)) {
-                  normalizedChoices = q.options as QuizChoice[];
-                } else if (q.options && typeof q.options === 'object') {
-                  normalizedChoices = Object.entries(q.options).map(([k, v]) => ({
-                    id: k,
-                    text: { fr: String(v), ja: String(v), en: String(v) },
-                    isCorrect: q.answer === k
-                  }));
-                }
-                
-                if (normalizedChoices.length === 0) {
-                  return null;
-                }
-                
-                const qId = q.id;
-                const isQTranslated = !!translatedQuizIds[qId];
-
-                return (
-                  <div className="quiz-card fade-in" key={quizIndex}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <p
-                          style={{
-                            color: "var(--text-muted)",
-                            fontSize: "0.88rem",
-                            fontWeight: 700,
-                            margin: 0
-                          }}
-                        >
-                          Q {quizIndex + 1} / {currentLevelData.quiz?.length}
-                        </p>
-                        <button
-                          onClick={() => setTranslatedQuizIds(prev => ({...prev, [qId]: !prev[qId]}))}
-                          style={{
-                              background: "none", border: "none", color: "var(--primary)",
-                              fontSize: "0.75rem", cursor: "pointer", fontWeight: 700
-                          }}
-                        >
-                          {isQTranslated ? t.reading.hideTranslation : t.reading.translateQuestion}
-                        </button>
-                    </div>
-                    
-                    <p style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px', lineHeight: '1.4' }} lang="fr">
-                      {(q.question?.fr || q.prompt?.fr)}
-                    </p>
-                    {isQTranslated && (
-                        <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '16px', marginTop: '0' }}>
-                            {appLang === 'ja' ? (q.question?.ja || q.prompt?.ja) : (q.question?.en || q.prompt?.en)}
-                        </p>
-                    )}
-                    {!isQTranslated && <div style={{ height: '16px' }} />}
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {normalizedChoices.map((choice, cIdx) => {
-                        const key = choice.id || String(cIdx);
-                        const isChosen = selectedAnswer === key;
-                        const isCorrectOption = choice.isCorrect;
-                        
-                        let statusClass = "";
-                        if (selectedAnswer !== null) {
-                          if (isCorrectOption) statusClass = "correct";
-                          else if (isChosen) statusClass = "incorrect";
-                        }
-
-                        return (
-                          <button
-                            key={key}
-                            disabled={selectedAnswer !== null}
-                            className={`quiz-option ${statusClass}`}
-                            onClick={() => {
-                              setSelectedAnswer(key);
-                              if (isCorrectOption) {
-                                setQuizScore((s) => s + 1);
-                              }
-                              
-                              if (quizTimerRef.current) {
-                                clearTimeout(quizTimerRef.current);
-                              }
-                              
-                              const delay = isCorrectOption ? 1700 : 3500;
-                              
-                              quizTimerRef.current = setTimeout(() => {
-                                setSelectedAnswer(null);
-                                setQuizIndex((idx) => idx + 1);
-                                quizTimerRef.current = null;
-                              }, delay);
-                            }}
-                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
-                          >
-                            <span lang="fr">{cIdx + 1}. {choice.text.fr}</span>
-                            {isQTranslated && (
-                                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                    {appLang === 'ja' ? choice.text.ja : choice.text.en}
-                                </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {selectedAnswer !== null && (
-                      <div
-                        className={`quiz-feedback-text ${
-                          (q.choices || (Array.isArray(q.options) ? q.options : [])).find(c => c.id === selectedAnswer)?.isCorrect
-                            ? "text-correct"
-                            : "text-incorrect"
-                        }`}
-                      >
-                        {(q.choices || (Array.isArray(q.options) ? q.options : [])).find(c => c.id === selectedAnswer)?.isCorrect
-                          ? `⭕ ${t.quiz.correct}`
-                          : `❌ ${t.quiz.wrong}`}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          ) : (
-            <div className="quiz-section" style={{ textAlign: "center", marginTop: "40px" }}>
-              <button
-                onClick={() => setNoQuizCompleted(true)}
-                style={{ width: "100%", padding: "16px", borderRadius: "16px", border: "none", background: "var(--primary)", color: "white", fontSize: "1.1rem", fontWeight: 700, cursor: "pointer" }}
-              >
-                {appLang === "ja" ? "🎉 読み終わった" : "🎉 Finished Reading"}
-              </button>
-            </div>
-          )}
-        </main>
+            const delay = isCorrect ? 1700 : 3500;
+            quizTimerRef.current = setTimeout(() => {
+              setSelectedAnswer(null);
+              setQuizIndex((index) => index + 1);
+              quizTimerRef.current = null;
+            }, delay);
+          }}
+          onCompleteWithoutQuiz={() => setNoQuizCompleted(true)}
+          completion={isReadingComplete ? {
+            hasQuiz: Boolean(currentLevelData.quiz && currentLevelData.quiz.length > 0),
+            quizScore,
+            quizQuestionCount: currentLevelData.quiz?.length || 0,
+            reward: sessionReward,
+            streak: streakStatus.display,
+            dueReviewCount: readingCompletionStats?.dueToday || 0,
+            hasVocabToReview: (sessionReward !== null && sessionReward.vocab > 0) || (readingCompletionStats?.dueToday || 0) > 0,
+            seriesId: currentArticle.seriesId || null,
+            seriesIndex: currentSeriesInfo?.currentIndex ?? null,
+            seriesTotal: currentSeriesInfo?.total ?? null,
+            hasNextEpisode: Boolean(quizNextEp),
+            onReviewVocabulary: () => startVocabReview("learned", "reading"),
+            onNextEpisode: () => {
+              if (quizNextEp) openArticle(quizNextEp);
+            },
+            onNextArticle: () => {
+              if (nextRewardArticle) {
+                openArticle(nextRewardArticle);
+              } else {
+                navigateTo("home");
+              }
+            },
+            onBackHome: () => handleBack("home"),
+          } : null}
+        />
       )}
 
       {/* VIEW: VOCAB REVIEW */}
       {activeView === "vocab_review" && (
-        <main className="view fade-in" style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', minHeight: '80vh', justifyContent: 'center' }}>
-          {vocabReviewWords.length === 0 ? (
-            <div className="fade-in" style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
-              <div style={{ fontSize: '4rem', marginBottom: '16px' }}>📚</div>
-              <h1 style={{ fontSize: '1.5rem', marginBottom: '16px', color: 'var(--text-main)' }}>
-                {appLang === "ja" ? "まだ復習する単語がありません" : "No words to review yet"}
-              </h1>
-              <p style={{ fontSize: '1.05rem', marginBottom: '32px', color: 'var(--text-muted)' }}>
-                {appLang === "ja" ? "もっと記事を読んで、語彙を増やしましょう。" : "Read more articles to expand your vocabulary."}
-              </p>
-              <button
-                onClick={() => {
-                  handleBack(vocabReviewReturnTo);
-                }}
-                style={{ width: '100%', padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
-              >
-                {appLang === "ja" ? "戻る" : "Back"}
-              </button>
-            </div>
-          ) : vocabReviewIndex < vocabReviewWords.length ? (
-            <div className="fade-in">
-              <h2 style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '40px' }}>{vocabReviewIndex + 1} / {vocabReviewWords.length}</h2>
-              <div style={{ textAlign: 'center', margin: '40px 0' }}>
-                <h1 style={{ fontSize: '2.5rem', color: 'var(--text-main)', marginBottom: '20px', fontWeight: 800 }}>{vocabReviewWords[vocabReviewIndex].fr}</h1>
-              </div>
-              {vocabReviewAnswers[vocabReviewIndex].length === 0 ? (
-                <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--surface)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border)', textAlign: 'center' }}>
-                  <p style={{ fontSize: '1.05rem', color: 'var(--text-muted)', marginBottom: '16px' }}>{appLang === 'ja' ? 'この単語の意味を確認しましょう' : "Let's check the meaning of this word"}</p>
-                  <div style={{ fontSize: '1.5rem', color: 'var(--primary)', fontWeight: 700, marginBottom: '32px' }}>
-                    {vocabReviewWords[vocabReviewIndex].conciseDef || vocabReviewWords[vocabReviewIndex].ja}
-                  </div>
-                  <button
-                    onClick={() => {
-                      handleRecordReviewResult(vocabReviewWords[vocabReviewIndex], true);
-                      setVocabReviewCorrectCount(prev => prev + 1);
-                      setVocabReviewIndex(idx => idx + 1);
-                    }}
-                    style={{ padding: '16px', borderRadius: '16px', background: 'var(--primary)', color: 'white', fontSize: '1.1rem', fontWeight: 700, border: 'none', cursor: 'pointer' }}
-                  >
-                    {appLang === "ja" ? "覚えた" : "I know this"}
-                  </button>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {vocabReviewAnswers[vocabReviewIndex].map((ans, i) => {
-                    const isCorrect = ans === (vocabReviewWords[vocabReviewIndex].conciseDef || vocabReviewWords[vocabReviewIndex].ja);
-                    let bg = "var(--surface)";
-                    let color = "var(--text-main)";
-                    let border = "1px solid var(--border)";
-                    
-                    if (vocabReviewSelected !== null) {
-                      if (isCorrect) {
-                        bg = "rgba(76, 217, 100, 0.1)";
-                        color = "#4cd964";
-                        border = "1px solid #4cd964";
-                      } else if (vocabReviewSelected === ans) {
-                        bg = "rgba(255, 59, 48, 0.1)";
-                        color = "#ff3b30";
-                        border = "1px solid #ff3b30";
-                      }
-                    }
-                    
-                    return (
-                      <button
-                        key={i}
-                        disabled={vocabReviewSelected !== null}
-                        onClick={() => {
-                          setVocabReviewSelected(ans);
-                          if (isCorrect) {
-                            setVocabReviewCorrectCount(prev => prev + 1);
-                          }
-                          handleRecordReviewResult(vocabReviewWords[vocabReviewIndex], isCorrect);
-                          
-                          setTimeout(() => {
-                            setVocabReviewSelected(null);
-                            setVocabReviewIndex(idx => idx + 1);
-                          }, 1200);
-                        }}
-                        style={{
-                          padding: '16px',
-                          borderRadius: '16px',
-                          background: bg,
-                          color: color,
-                          border: border,
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          cursor: vocabReviewSelected !== null ? 'default' : 'pointer',
-                          textAlign: 'left',
-                          transition: 'all 0.2s',
-                          boxShadow: vocabReviewSelected === null ? '0 2px 8px rgba(0,0,0,0.04)' : 'none'
-                        }}
-                      >
-                        {ans}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="fade-in" style={{ textAlign: 'center', padding: '36px 20px', background: 'var(--surface)', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
-                <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>
-                  {dueRemaining === 0 ? "🎉" : "✨"}
-                </div>
-                <h1 style={{ fontSize: '1.75rem', marginBottom: '12px', color: 'var(--text-main)', fontWeight: 800 }}>
-                  {dueRemaining === 0
-                    ? (appLang === "ja" ? "復習完了！" : "Review Completed!")
-                    : (appLang === "ja" ? "セッション完了！" : "Session Completed!")}
-                </h1>
-                <p style={{ fontSize: '1.05rem', marginBottom: '28px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  {dueRemaining === 0
-                    ? (appLang === "ja" ? "🎉 すべての復習が完了しました！" : "🎉 All reviews are up to date!")
-                    : (appLang === "ja"
-                        ? `あと${dueRemaining}語の復習が残っています`
-                        : `You have ${dueRemaining} ${dueRemaining === 1 ? 'word' : 'words'} left to review`)}
-                </p>
+        <VocabReviewView
+          appLang={appLang}
+          words={vocabReviewWords}
+          answers={vocabReviewAnswers}
+          index={vocabReviewIndex}
+          selectedAnswer={vocabReviewSelected}
+          dueRemaining={dueRemaining}
+          onBack={() => handleBack(vocabReviewReturnTo)}
+          onMarkKnown={(word) => {
+            handleRecordReviewResult(word, true);
+            setVocabReviewCorrectCount(prev => prev + 1);
+            setVocabReviewIndex(idx => idx + 1);
+          }}
+          onAnswer={(word, answer, isCorrect) => {
+            setVocabReviewSelected(answer);
+            if (isCorrect) {
+              setVocabReviewCorrectCount(prev => prev + 1);
+            }
+            handleRecordReviewResult(word, isCorrect);
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '420px', margin: '0 auto', width: '100%' }}>
-                  {/* PRIMARY CTA */}
-                  {dueRemaining > 0 ? (
-                    <button
-                      onClick={() => {
-                        checkAndAwardVocabReviewXP();
-                        startVocabReview("learned", vocabReviewReturnTo);
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '16px',
-                        borderRadius: '16px',
-                        background: 'var(--primary)',
-                        color: 'white',
-                        fontSize: '1.05rem',
-                        fontWeight: 700,
-                        border: 'none',
-                        cursor: 'pointer',
-                        boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-                      }}
-                    >
-                      {appLang === "ja"
-                        ? `🔄 復習を続ける (+${Math.min(5, dueRemaining)})`
-                        : `🔄 Continue review (+${Math.min(5, dueRemaining)})`}
-                    </button>
-                  ) : vocabReviewReturnTo === "reading" ? (
-                    nextRewardEp ? (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          openArticle(nextRewardEp);
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '16px',
-                          borderRadius: '16px',
-                          background: 'var(--primary)',
-                          color: 'white',
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          border: 'none',
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-                        }}
-                      >
-                        {appLang === "ja" ? "📖 次のエピソード" : "📖 Next Episode"}
-                      </button>
-                    ) : nextRewardArticle ? (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          openArticle(nextRewardArticle);
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '16px',
-                          borderRadius: '16px',
-                          background: 'var(--primary)',
-                          color: 'white',
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          border: 'none',
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-                        }}
-                      >
-                        {appLang === "ja" ? "📖 次の記事" : "📖 Next Article"}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          navigateTo("home");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '16px',
-                          borderRadius: '16px',
-                          background: 'var(--primary)',
-                          color: 'white',
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          border: 'none',
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-                        }}
-                      >
-                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
-                      </button>
-                    )
-                  ) : vocabReviewReturnTo === "home" ? (
-                    continueTarget ? (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          trackEvent("home_cta_clicked", { cta_type: "continue", position: 1 });
-                          openArticle(continueTarget, false, "home_continue");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '16px',
-                          borderRadius: '16px',
-                          background: 'var(--primary)',
-                          color: 'white',
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          border: 'none',
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-                        }}
-                      >
-                        {continueArticle
-                          ? (appLang === "ja" ? "📖 続きを読む" : "📖 Continue reading")
-                          : (appLang === "ja" ? "📖 次のエピソードへ" : "📖 Next episode")}
-                      </button>
-                    ) : dailyArticle && !isMissionCompletedToday ? (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          trackEvent("home_cta_clicked", { cta_type: "mission", position: 2 });
-                          openArticle(dailyArticle, false, "home_mission");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '16px',
-                          borderRadius: '16px',
-                          background: 'var(--primary)',
-                          color: 'white',
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          border: 'none',
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-                        }}
-                      >
-                        {appLang === "ja" ? "🎯 今日のミッションを読む" : "🎯 Today's mission"}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          navigateTo("home");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '16px',
-                          borderRadius: '16px',
-                          background: 'var(--primary)',
-                          color: 'white',
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          border: 'none',
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-                        }}
-                      >
-                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
-                      </button>
-                    )
-                  ) : (
-                    /* vocabReviewReturnTo === "words" */
-                    <button
-                      onClick={() => {
-                        checkAndAwardVocabReviewXP();
-                        handleBack("words");
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '16px',
-                        borderRadius: '16px',
-                        background: 'var(--primary)',
-                        color: 'white',
-                        fontSize: '1.05rem',
-                        fontWeight: 700,
-                        border: 'none',
-                        cursor: 'pointer',
-                        boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-                      }}
-                    >
-                      {appLang === "ja" ? "単語帳に戻る" : "Back to Vocabulary"}
-                    </button>
-                  )}
-
-                  {/* SECONDARY CTA */}
-                  {dueRemaining > 0 ? (
-                    vocabReviewReturnTo === "words" ? (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          handleBack("words");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '14px',
-                          borderRadius: '16px',
-                          background: 'var(--bg)',
-                          color: 'var(--text-main)',
-                          fontSize: '0.98rem',
-                          fontWeight: 600,
-                          border: '1px solid var(--border)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {appLang === "ja" ? "単語帳に戻る" : "Back to Vocabulary"}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          navigateTo("home");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '14px',
-                          borderRadius: '16px',
-                          background: 'var(--bg)',
-                          color: 'var(--text-main)',
-                          fontSize: '0.98rem',
-                          fontWeight: 600,
-                          border: '1px solid var(--border)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
-                      </button>
-                    )
-                  ) : (
-                    /* dueRemaining === 0 */
-                    (vocabReviewReturnTo === "reading" && (nextRewardEp || nextRewardArticle)) ? (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          navigateTo("home");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '14px',
-                          borderRadius: '16px',
-                          background: 'var(--bg)',
-                          color: 'var(--text-main)',
-                          fontSize: '0.98rem',
-                          fontWeight: 600,
-                          border: '1px solid var(--border)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
-                      </button>
-                    ) : vocabReviewReturnTo === "home" && (continueTarget || (dailyArticle && !isMissionCompletedToday)) ? (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          navigateTo("home");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '14px',
-                          borderRadius: '16px',
-                          background: 'var(--bg)',
-                          color: 'var(--text-main)',
-                          fontSize: '0.98rem',
-                          fontWeight: 600,
-                          border: '1px solid var(--border)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
-                      </button>
-                    ) : vocabReviewReturnTo === "words" ? (
-                      <button
-                        onClick={() => {
-                          checkAndAwardVocabReviewXP();
-                          navigateTo("home");
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '14px',
-                          borderRadius: '16px',
-                          background: 'var(--bg)',
-                          color: 'var(--text-main)',
-                          fontSize: '0.98rem',
-                          fontWeight: 600,
-                          border: '1px solid var(--border)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {appLang === "ja" ? "🏠 ホームへ戻る" : "🏠 Back to Home"}
-                      </button>
-                    ) : null
-                  )}
-                </div>
-              </div>
-            )}
-        </main>
+            setTimeout(() => {
+              setVocabReviewSelected(null);
+              setVocabReviewIndex(idx => idx + 1);
+            }, 1200);
+          }}
+          primaryAction={vocabReviewPrimaryAction}
+          secondaryAction={vocabReviewSecondaryAction}
+        />
       )}
 
       {/* VIEW 3: WORDBOOK (単語帳) */}
       {activeView === "words" && (
-        <main className="view fade-in">
-          {currentListId === null ? (
-            <div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: "22px",
-                }}
-              >
-                <h2 style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--primary)" }}>
-                  {t.words.title}
-                </h2>
-                <button
-                  onClick={(e) => {
-                    newListTriggerRef.current = e.currentTarget;
-                    setNewListModalOpen(true);
-                  }}
-                  style={{
-                    background: "var(--primary)",
-                    color: "white",
-                    border: "none",
-                    padding: "8px 14px",
-                    borderRadius: "16px",
-                    fontWeight: 700,
-                    fontSize: "0.85rem",
-                    cursor: "pointer",
-                  }}
-                >
-                  + {t.words.newList}
-                </button>
-              </div>
-
-              <div style={{ display: "grid", gap: "12px" }}>
-                {/* System list (read-only): learned from completed articles */}
-                <button
-                  type="button"
-                  onClick={() => setCurrentListId(LEARNED_LIST_ID)}
-                  className="quiz-card reset-button"
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: "12px",
-                    cursor: "pointer",
-                    marginBottom: 0,
-                    background: "linear-gradient(135deg, var(--primary-light), var(--surface) 70%)",
-                    border: "1px solid var(--primary-light)",
-                    width: "100%",
-                    textAlign: "left"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "14px", minWidth: 0 }}>
-                    <div
-                      aria-hidden="true"
-                      style={{
-                        background: "var(--surface)",
-                        width: "44px",
-                        height: "44px",
-                        borderRadius: "12px",
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        fontSize: "1.35rem",
-                        flexShrink: 0,
-                      }}
-                    >
-                      📚
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <h3 lang="fr" style={{ fontSize: "1.1rem", fontWeight: 700 }}>
-                        Furago — Mots appris
-                      </h3>
-                      <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                        {learnedWords.length} {t.words.wordCount} · {appLang === "ja" ? "読了した記事から自動で追加" : "Added automatically from completed articles"}
-                      </span>
-                    </div>
-                  </div>
-                  <svg
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="var(--text-muted)"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ flexShrink: 0 }}
-                  >
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                  </svg>
-                </button>
-
-                {wordLists.map((list) => {
-                  const count = savedWords.filter(
-                    (w) => (w.listId || "default") === list.id
-                  ).length;
-                  return (
-                    <button
-                      key={list.id}
-                      type="button"
-                      onClick={() => setCurrentListId(list.id)}
-                      className="quiz-card reset-button"
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        cursor: "pointer",
-                        marginBottom: 0,
-                        width: "100%",
-                        textAlign: "left"
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                        <div
-                          style={{
-                            background: "var(--primary-light)",
-                            color: "var(--primary)",
-                            width: "44px",
-                            height: "44px",
-                            borderRadius: "12px",
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                          }}
-                        >
-                          <svg
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                          </svg>
-                        </div>
-                        <div>
-                          <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>
-                            {list.name === 'デフォルト' ? t.words.defaultList : list.name}
-                          </h3>
-                          <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                            {count} {t.words.wordCount}
-                          </span>
-                        </div>
-                      </div>
-                      <svg
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="var(--text-muted)"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polyline points="9 18 15 12 9 6"></polyline>
-                      </svg>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : currentListId === LEARNED_LIST_ID ? (
-            /* ─── System list detail: Furago — Mots appris (read-only) ─── */
-            <div>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: "22px",
-                  gap: "12px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <button
-                    onClick={() => setCurrentListId(null)}
-                    style={{
-                      background: "var(--surface)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "50%",
-                      width: "38px",
-                      height: "38px",
-                      display: "flex",
-                      justifyContent: "center",
-                      alignItems: "center",
-                      fontSize: "1.1rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    ←
-                  </button>
-                  <h2
-                    style={{
-                      fontSize: "1.2rem",
-                      fontWeight: 800,
-                      color: "var(--primary)",
-                      margin: 0,
-                    }}
-                  >
-                    {LEARNED_LIST_NAME}
-                  </h2>
-                </div>
-                
-                {(() => {
-                  if (learnedWords.length === 0) return null;
-                  const stats = getReviewStats(learnedWords, nowMs);
-                  const hasDue = stats.dueToday > 0;
-                  return (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                        {stats.dueToday} {appLang === "ja" ? "件" : "due"}
-                      </div>
-                      <button
-                        disabled={!hasDue}
-                        onClick={() => startVocabReview("learned", "words")}
-                        style={{
-                          background: hasDue ? "var(--primary)" : "var(--bg)",
-                          color: hasDue ? "white" : "var(--text-muted)",
-                          border: "none",
-                          padding: "8px 16px",
-                          borderRadius: "20px",
-                          fontSize: "0.9rem",
-                          fontWeight: 700,
-                          cursor: hasDue ? "pointer" : "not-allowed",
-                          boxShadow: hasDue ? "0 2px 8px rgba(0,0,0,0.1)" : "none",
-                        }}
-                      >
-                        {appLang === "ja" ? "復習する" : "Review"}
-                      </button>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {learnedWords.length === 0 ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "50px 20px",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  <div style={{ fontSize: "2.5rem", marginBottom: "16px" }}>📚</div>
-                  <p style={{ fontSize: "1rem", fontWeight: 600, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                    {appLang === "ja"
-                      ? "まだ学んだ単語はありません。\n記事を読んで完了すると、自動的に追加されます。"
-                      : "You haven't learned any words yet.\nWords are added automatically when you complete an article."}
-                  </p>
-                </div>
-              ) : (
-                learnedWords.map((lw, idx) => (
-                  <div
-                    key={`learned-${idx}`}
-                    className="quiz-card fade-in"
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "12px",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <h3
-                        lang="fr"
-                        style={{
-                          margin: 0,
-                          fontSize: "1.15rem",
-                          fontWeight: 700,
-                          wordBreak: "break-word"
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="tap-word reset-button interactive-word"
-                          onClick={(e) => handleWordClick(e, lw.word, "")}
-                          style={{
-                            color: "var(--primary)",
-                            cursor: "pointer",
-                            textDecoration: "underline",
-                            textDecorationColor: "var(--border)",
-                            textUnderlineOffset: "4px"
-                          }}
-                        >
-                          {lw.word}
-                        </button>
-                      </h3>
-                      <span
-                        style={{
-                          color: "var(--text-muted)",
-                          fontSize: "0.8rem",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {appLang === "ja"
-                          ? `${lw.articleIds.length}つの記事から`
-                          : `From ${lw.articleIds.length} articles`}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => speakWord(lw.word)}
-                      title={t.words.listenPronunciation}
-                      aria-label={t.words.listenPronunciation}
-                      style={{
-                        background: "var(--bg)",
-                        border: "1px solid var(--border)",
-                        color: "var(--green)",
-                        borderRadius: "50%",
-                        width: "36px",
-                        height: "36px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                        <path
-                          d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        ></path>
-                      </svg>
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          ) : (
-            <div>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  marginBottom: "22px",
-                  gap: "12px",
-                }}
-              >
-                <button
-                  onClick={() => setCurrentListId(null)}
-                  style={{
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "50%",
-                    width: "38px",
-                    height: "38px",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    fontSize: "1.1rem",
-                    cursor: "pointer",
-                  }}
-                >
-                  ←
-                </button>
-                <h2
-                  style={{
-                    fontSize: "1.35rem",
-                    fontWeight: 800,
-                    color: "var(--primary)",
-                    margin: 0,
-                  }}
-                >
-                  {(() => {
-                    const ln = wordLists.find((l) => l.id === currentListId)?.name;
-                    if (ln === 'デフォルト') return t.words.defaultList;
-                    return ln || t.words.list;
-                  })()}
-                </h2>
-              </div>
-
-              {(() => {
-                const wordsInList = savedWords
-                  .filter((w) => (w.listId || "default") === currentListId)
-                  .slice()
-                  .reverse();
-
-                if (wordsInList.length === 0) {
-                  return (
-                    <div
-                      style={{
-                        textAlign: "center",
-                        padding: "50px 20px",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      <p>
-                        {t.words.emptyList.split('\n').map((line, i) => (
-                          <React.Fragment key={i}>
-                            {line}
-                            {i === 0 && <br />}
-                          </React.Fragment>
-                        ))}
-                      </p>
-                    </div>
-                  );
-                }
-
-                return wordsInList.map((word, idx) => (
-                  <div
-                    key={`${word.fr}-${idx}`}
-                    className="quiz-card fade-in"
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "10px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "flex-start",
-                      }}
-                    >
-                      <div>
-                        {word.nature && (
-                          <span
-                            style={{
-                              background: "var(--primary-light)",
-                              color: "var(--primary)",
-                              padding: "2px 6px",
-                              borderRadius: "4px",
-                              fontSize: "0.72rem",
-                              fontWeight: 700,
-                              marginBottom: "4px",
-                              display: "inline-block",
-                            }}
-                          >
-                            {word.nature}{word.gender && ` · ${word.gender}`}
-                          </span>
-                        )}
-                          <h3
-                          lang="fr"
-                          style={{
-                            color: "var(--primary)",
-                            margin: 0,
-                            fontSize: "1.2rem",
-                            fontWeight: 700,
-                          }}
-                        >
-                          {word.originalWord &&
-                          word.originalWord.toLowerCase() !== word.fr.toLowerCase() ? (
-                            <>
-                              {word.originalWord}{" "}
-                              <span
-                                style={{
-                                  fontSize: "0.85rem",
-                                  color: "var(--text-muted)",
-                                  fontWeight: 400,
-                                }}
-                              >
-                                ({t.words.lemmaPrefix} {word.fr})
-                              </span>
-                            </>
-                          ) : (
-                            word.fr
-                          )}
-                        </h3>
-                      </div>
-
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          onClick={() => speakWord(word.fr)}
-                          title={t.words.listenPronunciation}
-                          aria-label={t.words.listenPronunciation}
-                          style={{
-                            background: "var(--bg)",
-                            border: "1px solid var(--border)",
-                            color: "var(--green)",
-                            borderRadius: "50%",
-                            width: "36px",
-                            height: "36px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
-                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                            <path
-                              d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            ></path>
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteWord(word.fr, word.listId || "default")}
-                          title={t.words.delete}
-                          style={{
-                            background: "var(--bg)",
-                            border: "1px solid var(--border)",
-                            color: "var(--red)",
-                            borderRadius: "50%",
-                            width: "36px",
-                            height: "36px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <svg
-                            width="17"
-                            height="17"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="dict-def-line">
-                        {word.conciseDef || word.ja}
-                      </div>
-                      {word.phraseOriginale && word.traductionPhrase && (
-                        <div className="dict-context-row" style={{ marginTop: "6px" }}>
-                          <span className="dict-context-label">{t.dict.context}</span>
-                          <span>{word.traductionPhrase}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ));
-              })()}
-            </div>
-          )}
-        </main>
+        <WordbookView
+          t={t}
+          appLang={appLang}
+          savedWords={savedWords}
+          learnedWords={learnedWords}
+          wordLists={wordLists}
+          currentListId={currentListId}
+          learnedListId={LEARNED_LIST_ID}
+          learnedDueCount={currentListId === LEARNED_LIST_ID && learnedWords.length > 0 ? getReviewStats(learnedWords, nowMs).dueToday : 0}
+          onCreateList={(trigger) => {
+            newListTriggerRef.current = trigger;
+            setNewListModalOpen(true);
+          }}
+          onSelectList={setCurrentListId}
+          onReviewLearned={() => startVocabReview("learned", "words")}
+          onWordClick={handleWordClick}
+          onSpeakWord={speakWord}
+          onDeleteWord={handleDeleteWord}
+        />
       )}
-
       {/* Dictionary Floating Popup */}
       {dictOpen && (
         <dialog
@@ -4164,7 +2347,7 @@ export default function FuragoApp({
       
       {/* VIEW: PROGRESS */}
       {activeView === "progress" && (
-        <main className="view fade-in">
+        <main>
           <ProgressDashboard
             userState={userState}
             appLang={appLang}

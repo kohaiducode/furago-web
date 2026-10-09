@@ -59,7 +59,7 @@ describe("Home Habit Layer (6.3-B)", () => {
     localStorage.clear();
   });
 
-  it("HABIT-01: at_risk renders the streak reminder with a primary Next Best Action CTA.", () => {
+  it("HABIT-01: at_risk renders a compact streak reminder without a competing CTA.", () => {
     const state = getEmptyUserState();
     state.currentStreak = 5;
     state.lastStreakDate = ymd(-1);
@@ -68,31 +68,27 @@ describe("Home Habit Layer (6.3-B)", () => {
     const nudge = container.querySelector('[data-testid="habit-nudge"]');
     expect(nudge).not.toBeNull();
     expect(nudge!.getAttribute("data-state")).toBe("at_risk");
-    expect(nudge!.textContent).toContain("今日の学習でストリークをつなげましょう");
     expect(nudge!.textContent).toContain("5日連続");
+    expect(nudge!.textContent).toContain("今日の読書または復習で記録をつなげられます");
 
-    const buttons = within(nudge as HTMLElement).getAllByRole("button");
-    expect(buttons.length).toBe(1);
-    expect(buttons[0]).toBeDefined();
-    expect(buttons[0].textContent?.length).toBeGreaterThan(0);
+    expect(within(nudge as HTMLElement).queryAllByRole("button").length).toBe(0);
   });
 
-  it("HABIT-02: done_today renders a subtle confirmation without a CTA.", () => {
+  it("HABIT-02: done_today is folded into the compact habit summary, not a separate nudge.", () => {
     const state = getEmptyUserState();
     state.currentStreak = 3;
     state.lastStreakDate = ymd(0);
     const { container } = renderHome(state);
 
-    const nudge = container.querySelector('[data-testid="habit-nudge"]');
-    expect(nudge).not.toBeNull();
-    expect(nudge!.getAttribute("data-state")).toBe("done_today");
-    expect(nudge!.textContent).toContain("今日の学習日は完了しました");
-    expect(nudge!.textContent).toContain("3日連続");
+    expect(container.querySelector('[data-testid="habit-nudge"]')).toBeNull();
 
-    expect(within(nudge as HTMLElement).queryAllByRole("button").length).toBe(0);
+    const summary = container.querySelector('[data-testid="habit-summary"]');
+    expect(summary).not.toBeNull();
+    expect(container.querySelector('[data-habit="learningDay"]')?.getAttribute("data-done")).toBe("true");
+    expect(container.querySelector('[data-habit="mission"]')?.getAttribute("data-done")).toBe("false");
   });
 
-  it("HABIT-03: broken renders a gentle recovery message with a CTA.", () => {
+  it("HABIT-03: broken renders a compact recovery message without a CTA.", () => {
     const state = getEmptyUserState();
     state.currentStreak = 4;
     state.lastStreakDate = ymd(-3);
@@ -101,10 +97,9 @@ describe("Home Habit Layer (6.3-B)", () => {
     const nudge = container.querySelector('[data-testid="habit-nudge"]');
     expect(nudge).not.toBeNull();
     expect(nudge!.getAttribute("data-state")).toBe("broken");
-    expect(nudge!.textContent).toContain("新しいストリークを始めましょう");
+    expect(nudge!.textContent).toContain("今日の一読または復習で、新しい記録が始まります");
 
-    const buttons = within(nudge as HTMLElement).getAllByRole("button");
-    expect(buttons.length).toBe(1);
+    expect(within(nudge as HTMLElement).queryAllByRole("button").length).toBe(0);
   });
 
   it("HABIT-04: Mission pill is completed only when dailyMissionCompletedDate is today.", () => {
@@ -154,20 +149,24 @@ describe("Home Habit Layer (6.3-B)", () => {
     expect(container.querySelector('[data-habit="review"]')?.getAttribute("data-done")).toBe("false");
   });
 
-  it("HABIT-08: clicking the nudge CTA emits home_cta_clicked with cta_type habit_nudge.", () => {
+  it("HABIT-08: the primary learning action emits home_cta_clicked with the correct next-best-action type.", () => {
     const state = getEmptyUserState();
     state.currentStreak = 5;
     state.lastStreakDate = ymd(-1);
+    state.learnedVocabulary = [
+      { word: "chat", articleIds: ["art1"], firstLearnedAt: 0, lastReviewedAt: 0, dueAt: 0, interval: 30, difficulty: "normal", correctCount: 5, wrongCount: 0, reviewStreak: 4 },
+    ];
     const { container } = renderHome(state);
 
-    const nudge = container.querySelector('[data-testid="habit-nudge"]') as HTMLElement;
-    expect(nudge).not.toBeNull();
-    fireEvent.click(within(nudge).getAllByRole("button")[0]);
+    const primary = container.querySelector(".primary-card");
+    expect(primary).not.toBeNull();
+    const button = within(primary as HTMLElement).getByRole("button");
+    fireEvent.click(button);
 
-    expect(analytics.trackEvent).toHaveBeenCalledWith("home_cta_clicked", {
-      cta_type: "habit_nudge",
-      position: 0,
-    });
+    expect(analytics.trackEvent).toHaveBeenCalledWith(
+      "home_cta_clicked",
+      expect.objectContaining({ cta_type: "srs", position: 0 })
+    );
   });
 
   it("HABIT-09: home_viewed carries the current streak_state.", () => {
