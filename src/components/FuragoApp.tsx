@@ -7,12 +7,12 @@ import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib
 import { checkGoalCompletion } from "../lib/progress";
 import {
   extractUniqueCategories,
-  getCategoryFilterLabel,
   getCategoryKey,
   getCategoryLabel as resolveCategoryLabel,
 } from "../lib/category";
 import ProgressDashboard from "./ProgressDashboard";
 import DictionaryModal from "./DictionaryModal";
+import FilterModal from "./FilterModal";
 import NewsletterModal from "./NewsletterModal";
 import { checkAndTrackSessionStart, updateSessionActivity, trackEvent } from "../lib/analytics";
 import React, { useEffect, useState, useRef, useCallback } from "react";
@@ -27,7 +27,6 @@ import useSpeechSynthesis from "../hooks/useSpeechSynthesis";
 import { getTranslation, AppLanguage } from "@/lib/i18n";
 
 const DATA_URL = "https://kohaiducode.github.io/furago-data/articles.json";
-const LEVELS = ["LVL_1", "LVL_2", "LVL_3", "LVL_4"];
 // Reserved id for the read-only system list "📚 Furago — Mots appris".
 // Never part of wordLists, so it cannot be renamed, deleted, or used as a save target.
 const LEARNED_LIST_ID = "__furago_learned__";
@@ -289,22 +288,15 @@ export default function FuragoApp({
   const [allCategories, setAllCategories] = useState<string[]>(() => extractUniqueCategories(initialArticles || []));
   const [selectedCategories, setSelectedCategories] = useState<string[]>(() => extractUniqueCategories(initialArticles || []));
   const [filterModalType, setFilterModalType] = useState<"level" | "category" | null>(null);
-  const filterDialogRef = useRef<HTMLDialogElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (filterModalType !== null) {
-      if (filterDialogRef.current && !filterDialogRef.current.open) {
-        filterDialogRef.current.showModal();
-        // Focus first button (either level or close button)
-      }
-    } else {
-      if (filterDialogRef.current && filterDialogRef.current.open) {
-        filterDialogRef.current.close();
-      }
-      if (filterTriggerRef.current && document.contains(filterTriggerRef.current)) {
-        filterTriggerRef.current.focus();
-      }
+    if (
+      filterModalType === null &&
+      filterTriggerRef.current &&
+      document.contains(filterTriggerRef.current)
+    ) {
+      filterTriggerRef.current.focus();
     }
   }, [filterModalType]);
 
@@ -2065,145 +2057,55 @@ export default function FuragoApp({
       )}
 
       {/* Filter Modal (Level / Category) */}
-      <dialog
-        ref={filterDialogRef}
-        className="filter-dialog"
+      <FilterModal
+        isOpen={filterModalType !== null}
         onClose={() => setFilterModalType(null)}
-        onClick={(e) => {
-          if (e.target === filterDialogRef.current) {
-            setFilterModalType(null);
+        modalType={filterModalType ?? "all"}
+        selectedLevel={globalLevel}
+        onSelectLevel={(level) => {
+          stopAudio();
+          mutateUserState({ level });
+
+          // Clear any pending quiz progression timeout
+          if (quizTimerRef.current) {
+            clearTimeout(quizTimerRef.current);
+            quizTimerRef.current = null;
+          }
+          // Reset transient quiz state to prevent leaking into the new level
+          setQuizIndex(0);
+          setQuizScore(0);
+          setSelectedAnswer(null);
+          setNoQuizCompleted(false);
+          setSessionReward(null);
+
+          if (currentArticle && currentArticle.levels[level]) {
+            const speechContent = getSpeechContent(currentArticle.levels[level]);
+            prepareText(speechContent.text, speechContent.paragraphs);
           }
         }}
-        aria-labelledby="filter-dialog-title"
-      >
-        {filterModalType !== null && (
-          <div className="modal-sheet" style={{ margin: "0 auto", maxWidth: "520px" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ position: "relative" }}>
-              <div
-                style={{
-                  width: "40px",
-                  height: "5px",
-                  background: "#e5e5ea",
-                  borderRadius: "3px",
-                  margin: "0 auto 18px auto",
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setFilterModalType(null)}
-                aria-label={t.common.close}
-                style={{
-                  position: "absolute",
-                  top: "-15px",
-                  right: "0",
-                  background: "none",
-                  border: "none",
-                  fontSize: "1.5rem",
-                  cursor: "pointer",
-                  color: "var(--text-secondary)",
-                  padding: "4px",
-                  lineHeight: "1"
-                }}
-              >
-                &times;
-              </button>
-            </div>
-            <h3
-              id="filter-dialog-title"
-              style={{
-                textAlign: "center",
-                fontSize: "1.15rem",
-                fontWeight: 700,
-                marginBottom: "18px",
-              }}
-            >
-              {filterModalType === "level" ? t.reading.selectLevel : t.reading.selectCategory}
-            </h3>
-
-            <div
-              className={filterModalType === "category" ? "filter-grid" : ""}
-              style={{
-                display: filterModalType === "level" ? "flex" : undefined,
-                flexDirection: filterModalType === "level" ? "column" : undefined,
-                gap: "8px",
-                overflowY: "auto",
-              }}
-            >
-              {filterModalType === "level"
-                ? LEVELS.map((lvl) => (
-                    <button
-                      key={lvl}
-                      className="quiz-option"
-                      style={{
-                        borderColor:
-                          globalLevel === lvl ? "var(--primary)" : "transparent",
-                        background:
-                          globalLevel === lvl ? "var(--primary-light)" : "var(--bg)",
-                      }}
-                      onClick={() => {
-                        stopAudio();
-                        
-                        mutateUserState({ level: lvl });
-                        
-                        // Clear any pending quiz progression timeout
-                        if (quizTimerRef.current) {
-                          clearTimeout(quizTimerRef.current);
-                          quizTimerRef.current = null;
-                        }
-                        // Reset transient quiz state to prevent leaking into the new level
-                        setQuizIndex(0);
-                        setQuizScore(0);
-                        setSelectedAnswer(null);
-                        setNoQuizCompleted(false);
-                        setSessionReward(null);
-
-                        if (currentArticle && currentArticle.levels[lvl]) {
-                          const speechContent = getSpeechContent(currentArticle.levels[lvl]);
-                          prepareText(speechContent.text, speechContent.paragraphs);
-                        }
-                        setFilterModalType(null);
-                      }}
-                    >
-                      {t.levels[lvl as keyof typeof t.levels] || lvl}
-                    </button>
-                  ))
-                : allCategories.map((cat) => {
-                    const isSelected = selectedCategories.includes(cat);
-                    return (
-                      <button
-                        key={cat}
-                        className="quiz-option"
-                        style={{
-                          borderColor: isSelected ? "var(--primary)" : "#e5e5ea",
-                          background: isSelected
-                            ? "var(--primary-light)"
-                            : "var(--surface)",
-                        }}
-                        onClick={() => {
-                          if (isSelected) {
-                            if (selectedCategories.length > 1) {
-                              setSelectedCategories((prev) =>
-                                prev.filter((c) => c !== cat)
-                              );
-                            }
-                          } else {
-                            setSelectedCategories((prev) => [...prev, cat]);
-                          }
-                        }}
-                      >
-                        {(() => {
-                          const matchedArticle = articles.find(a => getCategoryKey(a.category) === cat);
-                          return matchedArticle
-                            ? getCategoryFilterLabel(matchedArticle.category, appLang)
-                            : cat;
-                        })()}
-                      </button>
-                    );
-                  })}
-            </div>
-          </div>
+        availableCategories={allCategories}
+        selectedCategories={selectedCategories}
+        onToggleCategory={(category) => {
+          if (selectedCategories.includes(category)) {
+            if (selectedCategories.length > 1) {
+              setSelectedCategories((previous) =>
+                previous.filter((selectedCategory) => selectedCategory !== category)
+              );
+            }
+          } else {
+            setSelectedCategories((previous) => [...previous, category]);
+          }
+        }}
+        categoryValues={articles.reduce<Record<string, Article["category"]>>(
+          (values, article) => {
+            const key = getCategoryKey(article.category);
+            if (key && values[key] === undefined) values[key] = article.category;
+            return values;
+          },
+          {}
         )}
-      </dialog>
+        appLang={appLang}
+      />
 
       {/* List Selector Modal (when saving a word and multiple lists exist) */}
       <dialog
