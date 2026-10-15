@@ -109,3 +109,22 @@ Généré via un formulaire intégré (`lead-bar`), il capture l'email, le nom, 
    *Pourquoi :* Permettra d'ajouter enfin la barre de recherche textuelle sans alourdir le code de la vue Home.
 10. **`package.json`**
     *Pourquoi :* Sera modifié pour inclure des outils essentiels à l'évolution (par exemple `lucide-react` pour remplacer les emojis par des icônes SVG, ou des outils de test pour l'XP).
+
+---
+
+## Phase 6 & Phase 7 — Modularisation, Qualité & PWA (Terminé)
+
+- **Extraction modulaire complète :**
+  - Extraction des hooks et composants isolés (`useSpeechSynthesis`, `DictionaryModal`, `NewsletterModal`, `FilterModal`).
+  - Découpage et typage des services utilitaires (`src/lib/newsletter.ts`, `src/lib/category.ts`).
+- **Durcissement Google Apps Script :**
+  - Protection active par limitation de fréquence (`CacheService` rate-limiting actif).
+  - Support de télémétrie et journalisation (`log_event`).
+- **Optimisation et PWA installable :**
+  - Déduplication de `dict.json` (-6,53 Mo).
+  - Règles de cache et en-têtes de sécurité Cloudflare Pages (`public/_headers`).
+  - PWA installable et résiliente hors-ligne (`public/manifest.json`, `public/sw.js`, `public/icon.svg`, `src/components/PwaRegister.tsx`).
+- **Validation & Qualité :**
+  - 192 tests unitaires passés (23 fichiers).
+  - 0 erreur TypeScript.
+  - 0 erreur et 0 warning ESLint.

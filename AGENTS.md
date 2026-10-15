@@ -22,3 +22,5 @@ Pour réduire la consommation de contexte, cibler précisément les fichiers per
 - `src/components/FilterModal.tsx` & `src/lib/category.ts` : Modale de filtre niveau/catégorie et normalisation des catégories.
 - `src/hooks/useSpeechSynthesis.ts` : Moteur audio TTS (`window.speechSynthesis`).
 - `src/lib/userState.ts` & `src/lib/srs.ts` : Persistance `localStorage`, migrations et algorithme SRS.
+- `src/components/PwaRegister.tsx` & `public/sw.js` & `public/manifest.json` : Enregistrement PWA, Service Worker (cache dictionnaire hors-ligne et navigation Network-First) et manifeste d'installation.
+- `public/_headers` : Règles de cache et d'en-têtes de sécurité pour l'export statique Cloudflare Pages.
