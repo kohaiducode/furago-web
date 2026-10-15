@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded rectangle -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+
+  <!-- Tricolor subtle accent bar above the 'F' -->
+  <g transform="translate(150, 92)">
+    <rect x="0" y="0" width="30" height="8" rx="4" fill="#002395" />
+    <rect x="36" y="0" width="30" height="8" rx="4" fill="#ffffff" />
+    <rect x="72" y="0" width="30" height="8" rx="4" fill="#ed2939" />
+  </g>
+
+  <!-- Stylized modern 'F' -->
+  <!-- Vertical stem -->
+  <rect x="150" y="120" width="48" height="272" rx="14" fill="#ffffff" />
+  <!-- Upper horizontal arm -->
+  <rect x="150" y="120" width="212" height="48" rx="14" fill="#ffffff" />
+  <!-- Middle horizontal arm -->
+  <rect x="150" y="232" width="144" height="44" rx="12" fill="#ffffff" />
+
+  <!-- Small tricolor accent dot / mark on the lower right -->
+  <circle cx="340" cy="380" r="10" fill="#ed2939" />
+</svg>
