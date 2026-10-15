@@ -1,6 +1,6 @@
 "use client";
 
-import { loadUserState, updateUserState, mergeLearnedVocabulary } from "../lib/userState";
+import { loadUserState, mergeLearnedVocabulary } from "../lib/userState";
 import type { SavedWord, UserState, WordList } from "../lib/userState";
 import { selectContinueArticle, selectRecommendedArticles, getStreakStatus, getNextReviewDayOffset, determineNextBestActionType, completedArticleId } from "../lib/home";
 import { getWordsDueForReview, recordReviewResult, getReviewStats } from "../lib/srs";
@@ -170,7 +170,6 @@ export default function FuragoApp({
     }
   }, [appLang]);
   const t = getTranslation(appLang);
-  const [showTranslation, setShowTranslation] = useState<Record<number, boolean>>({});
   const [translatedQuizIds, setTranslatedQuizIds] = useState<Record<string, boolean>>({});
   
   // Session Rewards tracking for accurate completion screen
@@ -241,10 +240,8 @@ export default function FuragoApp({
     vocabReviewXPDate: lastVocabReviewDate,
     lastOpenedArticleId,
     currentStreak,
-    longestStreak,
     lastStreakDate,
     xp: totalXP,
-    furagoLevel,
     completedArticles: completedArticleIds,
     articleProgress: articleProgressMap
   } = userState;
@@ -643,7 +640,6 @@ export default function FuragoApp({
     }
     // Note: for "learned", 'selected' is already deterministic and unique based on SRS!
 
-    const poolSource = source === "saved" ? savedWords : learnedWords.map(w => ({ conciseDef: "" })); // we need distracters!
     // Wait, let's just use Dictionary definitions for distracters or previous answers
     let allMeanings: string[] = [];
     if (source === "saved") {
@@ -698,7 +694,7 @@ export default function FuragoApp({
       const index = Math.abs(Math.floor(seed)) % pool.length;
       const selected = pool[index];
       
-      mutateUserState(s => ({
+      mutateUserState(() => ({
         dailyMissionTarget: { date: todayStr, articleId: String(selected.id), level: globalLevel }
       }));
     }
@@ -836,6 +832,7 @@ export default function FuragoApp({
       if (scrollTimeout) clearTimeout(scrollTimeout);
       if (restoreTimeout) clearTimeout(restoreTimeout);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userStateRestored, activeView, currentArticle, globalLevel]);
 
   useEffect(() => {
@@ -846,7 +843,6 @@ export default function FuragoApp({
         if (noQuizCompleted) {
           if (sessionReward === null) {
             // Intentional: completion rewards are applied when the completion state is reached (deduplicated in userState).
-            // eslint-disable-next-line react-hooks/set-state-in-effect
             updateStreak();
             const artRes = checkAndAwardArticleXP(
               currentArticle.id.toString(),
@@ -886,6 +882,7 @@ export default function FuragoApp({
         }
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userStateRestored, activeView, currentArticle, globalLevel, quizIndex, quizScore, updateStreak, checkAndAwardArticleXP, checkAndAwardQuizXP, noQuizCompleted, dailyArticle, todayStr, checkAndAwardDailyMissionXP, sessionReward]);
 
   const { continueArticle, currentSeriesNextEp } = React.useMemo(() => {
@@ -944,6 +941,7 @@ export default function FuragoApp({
         });
     };
     fetchCatalog();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialArticles]);
 
   const handleArticlePlayPause = () => {
@@ -1240,16 +1238,6 @@ export default function FuragoApp({
     return true;
   });
 
-  const getLevelProgress = (xp: number, currentLevel: number) => {
-    const xpInCurrentLevel = xp % 100;
-    return {
-      xpIntoLevel: xpInCurrentLevel,
-      xpToNextLevel: 100 - xpInCurrentLevel,
-      nextLevel: currentLevel + 1,
-      ratio: xpInCurrentLevel / 100
-    };
-  };
-
   const getArticleTitle = (a: Article): string => {
     const title = a.levels[globalLevel]?.title;
     return (typeof title === "string" ? title : title?.fr) || a.originalTitle || "";
@@ -1257,7 +1245,6 @@ export default function FuragoApp({
   const getCategoryLabel = (a: Article): string =>
     resolveCategoryLabel(a.category, appLang);
 
-  const levelProgress = getLevelProgress(totalXP, furagoLevel);
   const streakStatus = getStreakStatus(currentStreak, lastStreakDate, todayStr);
   const dueReviewCount = getWordsDueForReview(learnedWords, nowMs).length;
   const nextReviewOffset = dueReviewCount === 0 ? getNextReviewDayOffset(learnedWords, nowMs) : null;
@@ -1284,7 +1271,6 @@ export default function FuragoApp({
     3
   );
 
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const getNextArticleFor = useCallback((article: Article | null): Article | null => {
     if (!article) return null;
     const validArticles = filteredArticles;
@@ -1306,7 +1292,6 @@ export default function FuragoApp({
     
     // Fallback: Just next article in the filtered list
     return validArticles[(currentIndex + 1) % validArticles.length];
-    // eslint-disable-next-line react-hooks/preserve-manual-memoization
   }, [filteredArticles, completedArticleIds]);
 
   // --- ANALYTICS: HOME VIEWED ---
@@ -1329,7 +1314,6 @@ export default function FuragoApp({
   // --- ANALYTICS: SRS SESSION COMPLETED ---
   useEffect(() => {
     if (activeView === "vocab_review" && vocabReviewWords.length > 0 && vocabReviewIndex === vocabReviewWords.length) {
-      const key = `srs_completed_${vocabReviewWords.length}_${vocabReviewCorrectCount}_${Date.now()}`;
       if (!analyticsFiredRef.current['srs_completed_fired']) {
         trackEvent("srs_session_completed", { 
           reviewed_count: vocabReviewWords.length, 
