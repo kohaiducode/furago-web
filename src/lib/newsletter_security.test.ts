@@ -178,6 +178,7 @@ function createMockEnvironment(options: {
     usersRows,
     sentEmails,
     lock,
+    cacheStore,
   };
 }
 
@@ -368,6 +369,9 @@ describe("Google Apps Script Newsletter Backend Security Suite (SEC-01 -> SEC-10
     expect(res1.raw.status).toBe("ok");
     expect(res1.raw.userId).toBe("USR-0001");
 
+    // Nettoyage du cache pour émuler spécifiquement la concurrence atteignant le lock de base de données
+    env.cacheStore.clear();
+
     // 2ème requête identique (émulant concurrence arrivant sous le lock)
     const res2 = gas.handleNewsletterPost({ postData: { contents: payload } }, env.services);
     expect(res2.raw.status).toBe("already_exists");
@@ -473,6 +477,55 @@ describe("Google Apps Script Newsletter Backend Security Suite (SEC-01 -> SEC-10
     expect(env.sentEmails.length).toBe(1);
     expect(env.sentEmails[0].to).toBe("etudiant.japonais@furago.jp");
     expect(env.sentEmails[0].subject).toContain("Kenji");
+  });
+
+  // SEC-11: Rate limiting effectif via CacheService
+  it("SEC-11: Une seconde tentative immédiate d'inscription pour le même e-mail pendant RATE_LIMIT_SECONDS est bloquée par le cache", () => {
+    const env = createMockEnvironment();
+    const payload = {
+      email: "ratelimit.user@example.com",
+      name: "Jean",
+    };
+
+    // Première inscription : succès
+    const res1 = gas.handleNewsletterPost(
+      { postData: { contents: JSON.stringify(payload) } },
+      env.services
+    );
+    expect(res1.raw.status).toBe("ok");
+
+    // Deuxième tentative immédiate pour le même e-mail : bloquée par le rate limit du cache
+    const res2 = gas.handleNewsletterPost(
+      { postData: { contents: JSON.stringify(payload) } },
+      env.services
+    );
+    expect(res2.raw.status).toBe("error");
+    expect(res2.raw.message).toBe("Rate limit exceeded. Please try again later.");
+
+    // Le nombre de lignes d'utilisateurs reste à 2 (header + 1 seule insertion)
+    expect(env.usersRows.length).toBe(2);
+  });
+
+  // SEC-12: Support de l'action log_event
+  it("SEC-12: L'action log_event est acceptée sans erreur d'action non autorisée ni validation d'e-mail", () => {
+    const env = createMockEnvironment();
+    const event = {
+      postData: {
+        contents: JSON.stringify({
+          action: "log_event",
+          event: "article_read",
+          params: { article_id: "art-1", duration: 42 },
+          user_id: "user_test_123",
+          session_id: "sess_456",
+          timestamp: "2026-10-15T11:50:00.000Z",
+        }),
+      },
+    };
+
+    const response = gas.handleNewsletterPost(event, env.services);
+    expect(response.raw.status).toBe("ok");
+    // Ne touche pas à la base Users
+    expect(env.usersRows.length).toBe(1);
   });
 
   // Bonus: Test de non-énumération sur doGet

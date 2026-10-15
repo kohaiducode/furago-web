@@ -44,7 +44,7 @@ const ALLOWED_LEVELS = [
   "C1"
 ];
 
-const ALLOWED_ACTIONS = ["subscribe", "register", "check_email", ""];
+const ALLOWED_ACTIONS = ["subscribe", "register", "check_email", "log_event", ""];
 
 /**
  * ユーティリティ: メールアドレス形式の厳格な検証 (RFC 5322準拠)
@@ -104,6 +104,21 @@ function validateRegistrationData(data) {
   // 2. ハニーポット検証 (bot対策)
   if (data.hp || data.website || data.bot_check) {
     return { isValid: false, errorMessage: "Requête non autorisée." };
+  }
+
+  // log_event アクションの場合はメール検証等をスキップ
+  if (action === "log_event") {
+    return {
+      isValid: true,
+      sanitized: {
+        action,
+        email: "",
+        name: "",
+        gender: "回答しない",
+        level: "LVL_1",
+        categories: "すべて"
+      }
+    };
   }
 
   // 3. メールアドレスの検証
@@ -527,7 +542,12 @@ function handleNewsletterPost(e, services) {
       return safeGenericError("Une erreur est survenue. Veuillez réessayer.", S.ContentService);
     }
 
-    // E. check_email アクション（フロントエンドのバックグラウンド重複確認用）
+    // E. log_event アクション（FuragoWeb アナリティクスイベントの受信用）
+    if (action === "log_event") {
+      return createJsonResponse({ status: "ok" }, S.ContentService);
+    }
+
+    // F. check_email アクション（フロントエンドのバックグラウンド重複確認用）
     if (action === "check_email") {
       if (isEmailAlreadyRegistered(usersSheet, email)) {
         return createJsonResponse(
@@ -541,7 +561,22 @@ function handleNewsletterPost(e, services) {
       return createJsonResponse({ status: "available" }, S.ContentService);
     }
 
-    // F. 本登録（LockServiceによる排他制御ブロック）
+    // G. レートリミット（CacheService）の確認
+    if (S.CacheService) {
+      try {
+        const cache = S.CacheService.getScriptCache();
+        if (cache && cache.get("reg_" + encodeEmailForCache(email))) {
+          return safeGenericError(
+            "Rate limit exceeded. Please try again later.",
+            S.ContentService
+          );
+        }
+      } catch (cacheCheckErr) {
+        console.warn("CacheService check error:", cacheCheckErr);
+      }
+    }
+
+    // H. 本登録（LockServiceによる排他制御ブロック）
     const lock = S.LockService ? S.LockService.getScriptLock() : null;
     let hasLock = false;
     if (lock) {
